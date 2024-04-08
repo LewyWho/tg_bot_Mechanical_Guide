@@ -37,3 +37,11 @@ async def button_for_tags(tag_id):
         InlineKeyboardButton("Мои запросы", callback_data=f"my_requests_{tag_id}")
     )
     return kb
+
+
+async def check_my_answer():
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton(text="Посмотреть ответы", callback_data="check_my_answer"),
+    )
+    return kb
