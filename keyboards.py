@@ -45,3 +45,11 @@ async def check_my_answer():
         InlineKeyboardButton(text="Посмотреть ответы", callback_data="check_my_answer"),
     )
     return kb
+
+
+async def check_answers_and_create_answer(tag_id):
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton(text="Просмотреть ответы", callback_data=f"check_answers_{tag_id}")
+    )
+    return kb

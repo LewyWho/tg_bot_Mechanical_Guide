@@ -23,6 +23,7 @@ cursor.execute('''
 CREATE TABLE IF NOT EXISTS KnowledgeResponses (
     id INTEGER PRIMARY KEY,
     request_id INTEGER, -- Ссылка на идентификатор запроса
+    tag_id INTEGER,
     author_id INTEGER,
     response_text TEXT,
     response_media TEXT, -- Для хранения медиа-файлов

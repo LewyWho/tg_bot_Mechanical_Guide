@@ -28,7 +28,6 @@ MY_REQUESTS = 'my_requests'
 async def yes_need_notification(callback_query: types.CallbackQuery):
     """Обработчик для подтверждения подписки на уведомления."""
     try:
-        # Добавляем пользователя в базу данных с подпиской на уведомления
         cursor.execute("INSERT INTO Users (id, username, notification_preferences, role) VALUES (?,?,?,?)",
                        (callback_query.from_user.id, callback_query.from_user.username, 1, 0))
         conn.commit()
@@ -46,7 +45,6 @@ async def yes_need_notification(callback_query: types.CallbackQuery):
 async def no_need_notification(callback_query: types.CallbackQuery):
     """Обработчик для отказа от подписки на уведомления."""
     try:
-        # Добавляем пользователя в базу данных без подписки на уведомления
         cursor.execute("INSERT INTO Users (id, username, notification_preferences, role) VALUES (?,?,?,?)",
                        (callback_query.from_user.id, callback_query.from_user.username, 0, 0))
         conn.commit()
@@ -64,7 +62,6 @@ async def no_need_notification(callback_query: types.CallbackQuery):
 async def view_requests(callback_query: types.CallbackQuery):
     """Обработчик для просмотра запросов по тегам."""
     try:
-        # Получаем список тегов из базы данных
         tags = cursor.execute("SELECT id, tag_name FROM Tags").fetchall()
         keyboard = InlineKeyboardMarkup()
         for tag_id, tag_name in tags:
@@ -89,7 +86,6 @@ async def my_requests(callback_query: types.CallbackQuery):
 
         user_id = callback_query.from_user.id
 
-        # Получаем все запросы пользователя с соответствующими тегами
         cursor.execute("""
             SELECT kr.id, kr.request_text, kr.id_tag
             FROM KnowledgeRequests kr
@@ -99,7 +95,7 @@ async def my_requests(callback_query: types.CallbackQuery):
         user_requests = cursor.fetchall()
 
         if user_requests:
-            TOTAL_PAGES = (len(user_requests) + 4) // 5  # Определяем общее количество страниц
+            TOTAL_PAGES = (len(user_requests) + 4) // 5
             response_text = format_requests(user_requests)
             await send_requests_message(user_id, response_text)
         else:
@@ -181,7 +177,6 @@ async def process_entering_tag(message: types.Message, state: FSMContext):
     try:
         tag = message.text.strip()
 
-        # Проверяем наличие введенного тега в базе данных
         cursor.execute("SELECT id, tag_name FROM Tags WHERE tag_name LIKE ?", (f"%{tag}%",))
         found_tags = cursor.fetchall()
 

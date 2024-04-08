@@ -6,6 +6,8 @@ from aiogram import types, Dispatcher, Bot
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters import state
+from aiogram.dispatcher.filters.state import StatesGroup, State
 from aiogram.types import ParseMode, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils import executor
 import pytz
@@ -17,7 +19,6 @@ from datetime import datetime
 from aiogram.dispatcher import FSMContext
 
 from states import EnterRequestText
-from states import AnswerRequest
 
 bot = Bot(token=config.BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(bot, storage=MemoryStorage())
@@ -25,8 +26,9 @@ dp.middleware.setup(LoggingMiddleware())
 conn = sqlite3.connect('database.db')
 cursor = conn.cursor()
 
-CURRENT_PAGE = 1
-TOTAL_PAGES = 1
+
+class AnswerRequest(StatesGroup):
+    waiting_for_request_id = State()
 
 
 @dp.message_handler(commands=['start'], state='*')
@@ -45,11 +47,14 @@ async def handler_start(message: types.Message, state: FSMContext):
 
 
 @dp.callback_query_handler(lambda callback_query: callback_query.data.startswith('select_tag_'))
-async def select_tag(callback_query: types.CallbackQuery):
+async def select_tag(callback_query: types.CallbackQuery, state: FSMContext):
     """Обработчик для выбора тега."""
     try:
         tag_id = callback_query.data.split('_')[-1]
         tag_name = cursor.execute("SELECT tag_name FROM Tags WHERE id = ?", (tag_id,)).fetchone()[0]
+
+        async with state.proxy() as data:
+            data['tag_id'] = tag_id
 
         await bot.send_message(chat_id=callback_query.from_user.id, text=sms.get_tag(tag_name),
                                reply_markup=await keyboards.button_for_tags(tag_id))
@@ -135,151 +140,168 @@ async def process_request_text(message: types.Message, state: FSMContext):
 
 
 @dp.callback_query_handler(lambda callback_query: callback_query.data.startswith('view_all_requests_'))
-async def view_all_requests_callback(callback_query: types.CallbackQuery):
+async def view_all_requests_callback(callback_query: types.CallbackQuery, state: FSMContext):
     try:
         tag_id = callback_query.data.split('_')[-1]
 
-        if not hasattr(view_all_requests_callback, 'requests'):  # Проверяем, были ли запросы уже получены
-            # Если нет, то получаем запросы из базы данных
-            cursor.execute("""
-                SELECT kr.id, kr.request_text, 
-                       (SELECT COUNT(id) FROM KnowledgeResponses WHERE request_id = kr.id) AS num_responses,
-                       EXISTS(SELECT 1 FROM KnowledgeResponses WHERE request_id = kr.id) AS has_responses
-                FROM KnowledgeRequests kr
-                WHERE id_tag = ?
-            """, (tag_id,))
-            view_all_requests_callback.requests = cursor.fetchall()
+        # Устанавливаем состояние tag_id
+        async with state.proxy() as data:
+            data['tag_id'] = tag_id
 
-        requests = view_all_requests_callback.requests
+        cursor.execute("""
+            SELECT kr.id, kr.request_text, 
+                   (SELECT COUNT(id) FROM KnowledgeResponses WHERE request_id = kr.id) AS num_responses,
+                   EXISTS(SELECT 1 FROM KnowledgeResponses WHERE request_id = kr.id) AS has_responses
+            FROM KnowledgeRequests kr
+            WHERE id_tag = ?
+        """, (tag_id,))
+        requests = cursor.fetchall()
 
         if requests:
-            global TOTAL_PAGES
-            TOTAL_PAGES = (len(requests) + 4) // 5  # Определяем общее количество страниц
-
-            response_text = f"Запросы для тега с id {requests[0][2]}:\n"  # Исправлено здесь
-            start_idx = (CURRENT_PAGE - 1) * 5
-            end_idx = min(start_idx + 5, len(requests))
-            for idx, request in enumerate(requests[start_idx:end_idx], start=start_idx + 1):
+            response_text = f"Запросы для тега с id {tag_id}:\n"
+            for request in requests:
                 request_id, request_text, num_responses, has_responses = request
-                response_text += f"{idx}. Запрос: {request_text}\n"
+                response_text += f"{request_id}. Запрос: {request_text}\n"
                 response_text += f"Количество ответов: {num_responses}\n"
                 response_text += "\n"
         else:
             response_text = "Для данного тега пока нет запросов."
 
-        await send_requests_with_buttons(callback_query.from_user.id, response_text, tag_id)
-    except Exception as e:
-        await bot.send_message(chat_id=callback_query.from_user.id, text=f"Произошла ошибка: {e}")
-
-
-async def send_requests_with_buttons(user_id, response_text, tag_id):
-    """Отправляет сообщение с запросами и кнопками навигации."""
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    buttons = []
-
-    buttons.append(
-        InlineKeyboardButton(text="Посмотреть ответы/Ответить на запрос", callback_data=f"respond_to_request_{tag_id}"))
-
-    if CURRENT_PAGE > 1:
-        buttons.append(InlineKeyboardButton(text="Назад", callback_data="back_page_requests"))
-
-    if CURRENT_PAGE < TOTAL_PAGES:
-        buttons.append(InlineKeyboardButton(text="Вперед", callback_data="next_page_requests"))
-
-    keyboard.add(*buttons)
-    await bot.send_message(chat_id=user_id, text=response_text, reply_markup=keyboard)
-
-
-@dp.callback_query_handler(text="back_page_requests")
-async def back_page_requests(callback_query: types.CallbackQuery):
-    """Обработчик для кнопки 'Назад' к запросам."""
-    try:
-        global CURRENT_PAGE
-        if CURRENT_PAGE > 1:
-            CURRENT_PAGE -= 1
-            await view_all_requests_callback(callback_query)
+        if response_text != "Для данного тега пока нет запросов.":
+            await bot.send_message(chat_id=callback_query.from_user.id, text=response_text,
+                                   reply_markup=await keyboards.check_answers_and_create_answer(tag_id))
         else:
-            await bot.send_message(chat_id=callback_query.from_user.id, text="Это первая страница.")
+            await bot.send_message(chat_id=callback_query.from_user.id, text=response_text)
     except Exception as e:
         await bot.send_message(chat_id=callback_query.from_user.id, text=f"Произошла ошибка: {e}")
 
-
-@dp.callback_query_handler(text="next_page_requests")
-async def next_page_requests(callback_query: types.CallbackQuery):
-    """Обработчик для кнопки 'Вперед' к запросам."""
-    try:
-        global CURRENT_PAGE, TOTAL_PAGES
-        if CURRENT_PAGE < TOTAL_PAGES:
-            CURRENT_PAGE += 1
-            await view_all_requests_callback(callback_query)
-        else:
-            await bot.send_message(chat_id=callback_query.from_user.id, text="Это последняя страница.")
-    except Exception as e:
-        await bot.send_message(chat_id=callback_query.from_user.id, text=f"Произошла ошибка: {e}")
-
-
-@dp.callback_query_handler(lambda callback_query: callback_query.data.startswith('respond_to_request_'))
-async def respond_to_request(callback_query: types.CallbackQuery, state: FSMContext):
-    try:
-        # Получаем id тега из данных callback'а
-        tag_id = callback_query.data.split('_')[-1]
-
-        # Сохраняем id тега в состояние
-        await state.update_data(tag_id=tag_id)
-
-        # Отправляем запрос на ввод номера вопроса
-        await bot.send_message(chat_id=callback_query.from_user.id,
-                               text="Введите номер вопроса, для которого вы хотите посмотреть ответы/Оставить свой ответ")
-
-        # Устанавливаем состояние ожидания ввода номера вопроса
-        await AnswerRequest.waiting_for_request_id.set()
-
-    except Exception as e:
-        await bot.send_message(chat_id=callback_query.from_user.id, text=f"Произошла ошибка: {e}")
 
 @dp.message_handler(state=AnswerRequest.waiting_for_request_id)
 async def process_request_id(message: types.Message, state: FSMContext):
     try:
-        # Получаем id тега из состояния
-        data = await state.get_data()
-        tag_id = data.get('tag_id')
+        async with state.proxy() as data:
+            tag_id = data.get('tag_id')
 
-        request_id = message.text
+        request_id = int(message.text)
 
-        # Получение информации о выбранном запросе из базы данных
+        print(tag_id)
+        print(request_id)
+
         cursor.execute("""
             SELECT kr.id, kr.request_text, t.tag_name
             FROM KnowledgeRequests kr
             LEFT JOIN Tags t ON kr.id_tag = t.id
-            WHERE kr.id = ? AND kr.id_tag = ?
-        """, (request_id, tag_id))
+            WHERE kr.id_tag = ? AND kr.id = ?
+        """, (tag_id, request_id))
         request_info = cursor.fetchone()
+
+        print(request_info)
 
         if request_info:
             request_id, request_text, tag_name = request_info
 
-            response_text = f"➖➖➖➖➖➖➖➖➖➖➖➖➖➖\nID Тега: {request_id}\nНазвание тега: {tag_name}\nЗапрос: {request_text}\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n\nОтветы:\n"
-
-            # Получение всех ответов на данный запрос из базы данных
             cursor.execute("""
-                SELECT response_text
+                SELECT response_text, author_id
                 FROM KnowledgeResponses
                 WHERE request_id = ?
             """, (request_id,))
             responses = cursor.fetchall()
 
+            print(responses)
+
             if responses:
-                for idx, (response_text,) in enumerate(responses, start=1):
-                    response_text += f"{idx}. Ответ: {response_text}\n"
+                response_text = (f"➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
+                                 f"ID Тега: {tag_id}\n"
+                                 f"Название тега: {tag_name}\n"
+                                 f"Запрос: {request_text}\n"
+                                 f"➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
+                                 f"Ответы:\n"
+                                 f"➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n")
+                for idx, (temp_response_text, author_id) in enumerate(responses, start=1):
+                    response_text += f"Номер ответа: {idx}.\nID Пользователя: {author_id}\nОтвет: {temp_response_text}\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
             else:
-                response_text += "Нет ответов на данный запрос.\n"
+                response_text = "Нет ответов на данный запрос.\n"
 
-            await bot.send_message(chat_id=message.chat.id, text=response_text)
+            keyboard = InlineKeyboardMarkup()
+            keyboard.add(InlineKeyboardButton("Создать ответ", callback_data=f"create_response_{request_id}"))
 
+            await bot.send_message(chat_id=message.chat.id, text=response_text, reply_markup=keyboard)
         else:
-            await bot.send_message(chat_id=message.chat.id, text="Вопрос с таким номером не найден.")
+            await bot.send_message(chat_id=message.chat.id, text="Вопрос с указанным номером не найден.")
 
-        # Сбрасываем состояние
+        await state.finish()
+
+    except ValueError:
+        await bot.send_message(chat_id=message.chat.id, text="Неверный формат ввода номера вопроса.")
+    except Exception as e:
+        await bot.send_message(chat_id=message.chat.id, text=f"Произошла ошибка: {e}")
+
+
+@dp.callback_query_handler(lambda callback_query: callback_query.data.startswith(f'check_answers_'))
+async def check_answers(callback_query: types.CallbackQuery, state: FSMContext):
+    try:
+        tag_id = callback_query.data.split('_')[-1]
+
+        cursor.execute("""
+            SELECT DISTINCT request_id FROM KnowledgeResponses
+            WHERE request_id IN (
+                SELECT id FROM KnowledgeRequests WHERE id_tag = ?
+            )
+        """, (tag_id,))
+        requests_with_answers = cursor.fetchall()
+
+        print(requests_with_answers)
+
+        if requests_with_answers:
+            await bot.send_message(chat_id=callback_query.from_user.id,
+                                   text="Введите номер вопроса, где вы хотите посмотреть ответы:")
+            await AnswerRequest.waiting_for_request_id.set()
+        else:
+            await bot.send_message(chat_id=callback_query.from_user.id,
+                                   text="Нет доступных ответов для данного тега.")
+    except Exception as e:
+        await bot.send_message(chat_id=callback_query.from_user.id,
+                               text=f"Произошла ошибка: {e}")
+
+
+class AnswerResponse(StatesGroup):
+    waiting_for_response_text = State()
+
+
+@dp.callback_query_handler(lambda callback_query: callback_query.data.startswith('create_response_'))
+async def create_response_callback(callback_query: types.CallbackQuery, state: FSMContext):
+    try:
+        request_id = callback_query.data.split('_')[-1]
+
+        print(request_id)
+
+        async with state.proxy() as data:
+            data['request_id'] = request_id
+
+        await bot.send_message(chat_id=callback_query.from_user.id, text="Введите ваш ответ:")
+        await AnswerResponse.waiting_for_response_text.set()
+
+    except Exception as e:
+        await bot.send_message(chat_id=callback_query.from_user.id, text=f"Произошла ошибка: {e}")
+
+
+@dp.message_handler(state=AnswerResponse.waiting_for_response_text)
+async def create_response(message: types.Message, state: FSMContext):
+    try:
+        async with state.proxy() as data:
+            request_id = data['request_id']
+
+        response_text = message.text
+        author_id = message.from_user.id
+
+        cursor.execute("""
+            INSERT INTO KnowledgeResponses (request_id, author_id, response_text) 
+            VALUES (?, ?, ?)
+        """, (request_id, author_id, response_text))
+        conn.commit()
+
+        await bot.send_message(chat_id=message.chat.id, text="Ваш ответ сохранен и отправлен на модерацию")
+
         await state.finish()
 
     except Exception as e:
