@@ -184,8 +184,6 @@ async def process_request_id(message: types.Message, state: FSMContext):
 
         request_id = int(message.text)
 
-        print(tag_id)
-        print(request_id)
 
         cursor.execute("""
             SELECT kr.id, kr.request_text, t.tag_name
@@ -195,15 +193,15 @@ async def process_request_id(message: types.Message, state: FSMContext):
         """, (tag_id, request_id))
         request_info = cursor.fetchone()
 
-        print(request_info)
 
         if request_info:
             request_id, request_text, tag_name = request_info
 
             cursor.execute("""
-                SELECT response_text, author_id
+                SELECT response_text, author_id, timestamp
                 FROM KnowledgeResponses
                 WHERE request_id = ?
+                ORDER BY timestamp DESC
             """, (request_id,))
             responses = cursor.fetchall()
 
