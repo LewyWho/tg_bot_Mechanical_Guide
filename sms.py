@@ -61,7 +61,8 @@ def get_user_responses_count(user_id):
 def profile_user(user_id):
     num_questions = get_user_questions_count(user_id)
     num_responses = get_user_responses_count(user_id)
-    num_votes_for, num_votes_against = get_user_votes(user_id)
+    num_votes_for = cursor.execute("SELECT COUNT(votes) FROM KnowledgeRequests WHERE author_id=? AND votes ='1'", (user_id,)).fetchone()[0]
+    num_votes_against = cursor.execute("SELECT COUNT(votes) FROM KnowledgeResponses WHERE author_id=? AND votes ='1'", (user_id,)).fetchone()[0]
     role = get_user_role(user_id)
     role_str = "Сотрудник" if role == 0 else "Администратор"
     return f"""Ваш профиль:
@@ -69,8 +70,8 @@ def profile_user(user_id):
 Ваш ID: {user_id}
 Количество ваших вопросов: {num_questions}
 Количество ваших ответов: {num_responses}
-Количество голосов "За": {num_votes_for}
-Количество голосов "Против": {num_votes_against}
+Количество голосов для ваших вопросов: {num_votes_for}
+Количество голосов для ваших ответов: {num_votes_against}
 Ваша роль: {role_str}
 ➖➖➖➖➖➖➖➖➖➖➖➖➖➖"""
 

@@ -29,6 +29,7 @@ cursor = conn.cursor()
 
 class AnswerRequest(StatesGroup):
     waiting_for_request_id = State()
+    waiting_for_response_id = State()
 
 
 @dp.message_handler(commands=['start'], state='*')
@@ -151,18 +152,21 @@ async def view_all_requests_callback(callback_query: types.CallbackQuery, state:
         cursor.execute("""
             SELECT kr.id, kr.request_text, 
                    (SELECT COUNT(id) FROM KnowledgeResponses WHERE request_id = kr.id) AS num_responses,
-                   EXISTS(SELECT 1 FROM KnowledgeResponses WHERE request_id = kr.id) AS has_responses
+                   EXISTS(SELECT 1 FROM KnowledgeResponses WHERE request_id = kr.id) AS has_responses,
+                   kr.votes
             FROM KnowledgeRequests kr
             WHERE id_tag = ?
+            ORDER BY kr.votes DESC
         """, (tag_id,))
         requests = cursor.fetchall()
 
         if requests:
             response_text = f"Запросы для тега с id {tag_id}:\n"
             for request in requests:
-                request_id, request_text, num_responses, has_responses = request
+                request_id, request_text, num_responses, has_responses, votes = request  # Добавлено votes
                 response_text += f"{request_id}. Запрос: {request_text}\n"
                 response_text += f"Количество ответов: {num_responses}\n"
+                response_text += f"Голосов: {votes}\n"  # Выводим количество голосов
                 response_text += "\n"
         else:
             response_text = "Для данного тега пока нет запросов."
@@ -184,7 +188,6 @@ async def process_request_id(message: types.Message, state: FSMContext):
 
         request_id = int(message.text)
 
-
         cursor.execute("""
             SELECT kr.id, kr.request_text, t.tag_name
             FROM KnowledgeRequests kr
@@ -193,19 +196,16 @@ async def process_request_id(message: types.Message, state: FSMContext):
         """, (tag_id, request_id))
         request_info = cursor.fetchone()
 
-
         if request_info:
             request_id, request_text, tag_name = request_info
 
             cursor.execute("""
-                SELECT response_text, author_id, timestamp
+                SELECT response_text, author_id, timestamp, votes, id
                 FROM KnowledgeResponses
                 WHERE request_id = ?
                 ORDER BY timestamp DESC
             """, (request_id,))
             responses = cursor.fetchall()
-
-            print(responses)
 
             if responses:
                 response_text = (f"➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
@@ -215,13 +215,15 @@ async def process_request_id(message: types.Message, state: FSMContext):
                                  f"➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
                                  f"Ответы:\n"
                                  f"➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n")
-                for idx, (temp_response_text, author_id) in enumerate(responses, start=1):
-                    response_text += f"Номер ответа: {idx}.\nID Пользователя: {author_id}\nОтвет: {temp_response_text}\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
+                for idx, (temp_response_text, author_id, timestamp, votes, id) in enumerate(responses, start=1):
+                    response_text += f"Номер ответа: {id}.\nID Пользователя: {author_id}\nКоличество голосов: {votes}\nВремя: {timestamp}\nОтвет: {temp_response_text}\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
             else:
                 response_text = "Нет ответов на данный запрос.\n"
 
             keyboard = InlineKeyboardMarkup()
             keyboard.add(InlineKeyboardButton("Создать ответ", callback_data=f"create_response_{request_id}"))
+            keyboard.add(InlineKeyboardButton("Проголосовать за вопрос", callback_data=f"vote_question_{request_id}"))
+            keyboard.add(InlineKeyboardButton("Проголосовать за ответ", callback_data=f"vote_response_{request_id}"))
 
             await bot.send_message(chat_id=message.chat.id, text=response_text, reply_markup=keyboard)
         else:
@@ -231,6 +233,7 @@ async def process_request_id(message: types.Message, state: FSMContext):
 
     except ValueError:
         await bot.send_message(chat_id=message.chat.id, text="Неверный формат ввода номера вопроса.")
+
     except Exception as e:
         await bot.send_message(chat_id=message.chat.id, text=f"Произошла ошибка: {e}")
 
@@ -248,15 +251,14 @@ async def check_answers(callback_query: types.CallbackQuery, state: FSMContext):
         """, (tag_id,))
         requests_with_answers = cursor.fetchall()
 
-        print(requests_with_answers)
-
         if requests_with_answers:
             await bot.send_message(chat_id=callback_query.from_user.id,
                                    text="Введите номер вопроса, где вы хотите посмотреть ответы:")
             await AnswerRequest.waiting_for_request_id.set()
         else:
             await bot.send_message(chat_id=callback_query.from_user.id,
-                                   text="Нет доступных ответов для данного тега.")
+                                   text="Введите номер вопроса, где вы хотите посмотреть ответы:")
+            await AnswerRequest.waiting_for_request_id.set()
     except Exception as e:
         await bot.send_message(chat_id=callback_query.from_user.id,
                                text=f"Произошла ошибка: {e}")
@@ -304,6 +306,80 @@ async def create_response(message: types.Message, state: FSMContext):
 
     except Exception as e:
         await bot.send_message(chat_id=message.chat.id, text=f"Произошла ошибка: {e}")
+
+
+@dp.callback_query_handler(lambda callback_query: callback_query.data.startswith('vote_question_'))
+async def vote_question(callback_query: types.CallbackQuery):
+    try:
+        request_id = int(callback_query.data.split('_')[-1])
+        user_id = callback_query.from_user.id
+
+        cursor.execute("SELECT 1 FROM QuestionVotes WHERE user_id = ? AND question_id = ?", (user_id, request_id))
+        existing_vote = cursor.fetchone()
+
+        if existing_vote:
+            await bot.answer_callback_query(callback_query.id, text="Вы уже голосовали за этот вопрос!")
+        else:
+            cursor.execute("UPDATE KnowledgeRequests SET votes = votes + 1 WHERE id = ?", (request_id,))
+            # Записываем голос пользователя
+            cursor.execute("INSERT INTO QuestionVotes (user_id, question_id) VALUES (?, ?)", (user_id, request_id))
+            conn.commit()
+
+            await bot.answer_callback_query(callback_query.id, text="Вы успешно проголосовали за вопрос!")
+
+    except Exception as e:
+        await bot.send_message(chat_id=callback_query.from_user.id, text=f"Произошла ошибка: {e}")
+
+
+@dp.callback_query_handler(lambda callback_query: callback_query.data.startswith('vote_response_'))
+async def vote_response(callback_query: types.CallbackQuery, state: FSMContext):
+    try:
+        await bot.send_message(chat_id=callback_query.from_user.id,
+                               text="Введите номер ответа, за который хотите проголосовать:")
+
+        await AnswerRequest.waiting_for_response_id.set()
+
+        async with state.proxy() as data:
+            data['response_id'] = int(callback_query.data.split('_')[-1])
+    except Exception as e:
+        await bot.send_message(chat_id=callback_query.from_user.id, text=f"Произошла ошибка: {e}")
+
+
+@dp.message_handler(state=AnswerRequest.waiting_for_response_id)
+async def process_response_id(message: types.Message, state: FSMContext):
+    try:
+        response_id = int(message.text)
+
+        async with state.proxy() as data:
+            response_id = data['response_id']
+
+        user_id = message.from_user.id
+
+        cursor.execute("SELECT 1 FROM ResponseVotes WHERE user_id = ? AND response_id = ?", (user_id, response_id))
+        existing_vote = cursor.fetchone()
+
+        if existing_vote:
+            await message.answer("Вы уже голосовали за этот ответ!")
+        else:
+            cursor.execute("""
+                UPDATE KnowledgeResponses
+                SET votes = votes + 1
+                WHERE id = ?
+            """, (response_id,))
+            conn.commit()
+
+            cursor.execute("INSERT INTO ResponseVotes (user_id, response_id) VALUES (?, ?)", (user_id, response_id))
+            conn.commit()
+
+            await message.answer("Ваш голос за ответ успешно засчитан!")
+
+            await state.finish()
+
+    except ValueError:
+        await message.answer("Неверный формат ввода номера ответа.")
+    except Exception as e:
+        await message.answer(f"Произошла ошибка: {e}")
+
 
 
 if __name__ == '__main__':

@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS KnowledgeRequests (
     request_media TEXT, -- Для хранения медиа-файлов
     id_tag INTEGER,
     votes INTEGER DEFAULT 0, -- Количество голосов
+    vote_author_id INTEGER, -- Идентификатор автора голосования
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, -- Дата и время создания
     moderated BOOLEAN DEFAULT FALSE -- Пометка о модерации администратором
 );
@@ -28,6 +29,7 @@ CREATE TABLE IF NOT EXISTS KnowledgeResponses (
     response_text TEXT,
     response_media TEXT, -- Для хранения медиа-файлов
     votes INTEGER DEFAULT 0, -- Количество голосов
+    vote_author_id INTEGER, -- Идентификатор автора голосования
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, -- Дата и время создания
     moderated BOOLEAN DEFAULT FALSE -- Пометка о модерации администратором
 );
@@ -43,34 +45,12 @@ CREATE TABLE IF NOT EXISTS Users (
 );
 ''')
 
-# Таблица для голосования сотрудников
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS Votes (
-    id INTEGER PRIMARY KEY,
-    user_id INTEGER,
-    request_id INTEGER, -- Для запросов на знания
-    response_id INTEGER, -- Для ответов на запросы на знания
-    vote_type TEXT, -- Голос за или против
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-''')
 
 # Таблица для тегов
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS Tags (
     id INTEGER PRIMARY KEY,
     tag_name TEXT UNIQUE
-);
-''')
-
-# Связующая таблица для запросов и тегов (многие ко многим)
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS RequestTags (
-    request_id INTEGER,
-    tag_id INTEGER,
-    PRIMARY KEY (request_id, tag_id),
-    FOREIGN KEY (request_id) REFERENCES KnowledgeRequests(id),
-    FOREIGN KEY (tag_id) REFERENCES Tags(id)
 );
 ''')
 
@@ -91,6 +71,22 @@ cursor.execute('''
 CREATE TABLE IF NOT EXISTS Admins (
     user_id INTEGER UNIQUE,
     password TEXT
+);
+''')
+
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS QuestionVotes (
+    user_id INTEGER,
+    question_id INTEGER,
+    PRIMARY KEY (user_id, question_id)
+);
+''')
+
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS ResponseVotes (
+    user_id INTEGER,
+    response_id INTEGER,
+    PRIMARY KEY (user_id, response_id)
 );
 ''')
 

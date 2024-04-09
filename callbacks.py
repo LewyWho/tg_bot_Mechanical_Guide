@@ -68,8 +68,11 @@ async def view_requests(callback_query: types.CallbackQuery):
             button = InlineKeyboardButton(text=tag_name, callback_data=f"select_tag_{tag_id}")
             keyboard.add(button)
 
-        await bot.send_message(chat_id=callback_query.from_user.id,
-                               text="Выберите тег:", reply_markup=keyboard)
+        if tags:
+            await bot.send_message(chat_id=callback_query.from_user.id,
+                                   text="Выберите тег:", reply_markup=keyboard)
+        else:
+            await bot.send_message(chat_id=callback_query.from_user.id, text="Теги не найдены.")
     except Exception as e:
         await bot.send_message(chat_id=callback_query.from_user.id,
                                text=f"Произошла ошибка: {e}")
