@@ -2,6 +2,8 @@ import asyncio
 import os
 import sqlite3
 import time
+from collections import defaultdict
+
 from aiogram import types, Dispatcher, Bot
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
@@ -55,6 +57,43 @@ async def handler_start(message: types.Message, state: FSMContext):
     else:
         await bot.send_message(chat_id=message.from_user.id, text=sms.profile_user(message.from_user.id),
                                reply_markup=await keyboards.main_menu())
+
+
+@dp.message_handler(commands=['users'], state='*')
+async def handler_users(message: types.Message, state: FSMContext):
+    cursor.execute("""
+        SELECT u.id, u.username, u.rank_user, COUNT(DISTINCT kr.id) AS total_responses, COUNT(DISTINCT rq.id) AS total_requests
+        FROM Users u
+        LEFT JOIN KnowledgeResponses kr ON u.id = kr.author_id
+        LEFT JOIN KnowledgeRequests rq ON u.id = rq.author_id
+        GROUP BY u.id, u.username, u.rank_user
+    """)
+    users_data = cursor.fetchall()
+
+    temp_file_path = "users.txt"
+    with open(temp_file_path, "w", encoding="utf-8") as file:
+        users_message = "Список пользователей:\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
+        for user_id, username, rank_user, total_responses, total_requests in users_data:
+            if not username:
+                username = "неизвестно"
+            if username == "неизвестно":
+                username = "неизвестно"
+            else:
+                username = f"@{username}"
+            users_message += f"ID: {user_id}\n" \
+                             f"Имя пользователя: {username}\n" \
+                             f"Ранг: {rank_user}\n" \
+                             f"Запросов на знания: {total_requests}\n" \
+                             f"Ответов: {total_responses}\n" \
+                             "➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
+            file.write(users_message)
+
+    if len(users_data) > 15:
+        with open(temp_file_path, "rb") as file:
+            await message.answer_document(file)
+        os.remove(temp_file_path)
+    else:
+        await message.answer(users_message)
 
 
 @dp.message_handler(commands=['cancel'], state='*')
@@ -135,7 +174,6 @@ async def process_question_number(message: types.Message, state: FSMContext):
     types.ContentType.VIDEO_NOTE
 ])
 async def process_new_answer(message: types.Message, state: FSMContext):
-
     new_answer = message.text
 
     async with state.proxy() as data:
@@ -206,7 +244,6 @@ async def handler_q_change(message: types.Message, state: FSMContext):
     await ChangeQuestion.waiting_for_question_number.set()
 
 
-
 @dp.message_handler(state=ChangeQuestion.waiting_for_question_number, content_types=[
     types.ContentType.TEXT,
     types.ContentType.DOCUMENT,
@@ -258,8 +295,9 @@ async def process_new_question(message: types.Message, state: FSMContext):
         user_id = message.from_user.id
         question_number = data['question_number']
 
-    cursor.execute("UPDATE KnowledgeRequests SET request_text=?, request_media=?, moderated=0 WHERE id=? AND author_id=?",
-                   (new_question, media_file_id, question_number, user_id))
+    cursor.execute(
+        "UPDATE KnowledgeRequests SET request_text=?, request_media=?, moderated=0 WHERE id=? AND author_id=?",
+        (new_question, media_file_id, question_number, user_id))
     conn.commit()
     await message.answer("Вопрос успешно изменен и отправлен на проверку.")
     await state.finish()
