@@ -80,7 +80,8 @@ async def handler_a_change(message: types.Message, state: FSMContext):
     response_list = "\n".join(
         [f"{index + 1}. Запрос: {response[3]}\nТег: {response[4]}\nВаш ответ: {response[2]}\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖" for
          index, response in enumerate(user_responses)])
-    await message.answer("Выберите номер вопроса, который вы хотите изменить\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n/cancel - для отмены\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n" + response_list)
+    await message.answer(
+        "Выберите номер вопроса, который вы хотите изменить\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n/cancel - для отмены\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n" + response_list)
     await ChangeAnswer.waiting_for_question_number.set()
 
 
@@ -136,7 +137,8 @@ async def handler_q_change(message: types.Message, state: FSMContext):
     question_list = "\n".join(
         [f"{index + 1}. Ваш вопрос: {question[1]}\nТег: {question[3]}\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖" for index, question in
          enumerate(user_questions)])
-    await message.answer("Выберите номер вопроса, который вы хотите изменить\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n/cancel - для отмены\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n" + question_list)
+    await message.answer(
+        "Выберите номер вопроса, который вы хотите изменить\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n/cancel - для отмены\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n" + question_list)
     await ChangeQuestion.waiting_for_question_number.set()
 
 
@@ -354,29 +356,41 @@ async def create_request(callback_query: types.CallbackQuery, state: FSMContext)
         await EnterRequestText.waiting_for_request_text.set()
 
         await bot.send_message(chat_id=callback_query.from_user.id,
-                               text="Введите текст нового запроса:")
+                               text="Введите текст нового запроса или отправьте файл вашего запроса:")
     except Exception as e:
         await bot.send_message(chat_id=callback_query.from_user.id,
                                text=f"Произошла ошибка: {e}")
 
 
-@dp.message_handler(state=EnterRequestText.waiting_for_request_text)
+@dp.message_handler(state=EnterRequestText.waiting_for_request_text, content_types=[
+    types.ContentType.TEXT,
+    types.ContentType.DOCUMENT,
+    types.ContentType.PHOTO,
+    types.ContentType.VIDEO,
+    types.ContentType.VOICE,
+    types.ContentType.VIDEO_NOTE
+])
 async def process_request_text(message: types.Message, state: FSMContext):
-    """Обработчик для текста нового запроса."""
+    """Обработчик для текста нового запроса или отправки файла."""
     try:
-        request_text = message.text.strip()
-
+        request_text = message.text.strip() if message.text else ""  # Проверка на наличие текста запроса
         async with state.proxy() as data:
             tag_id = data['tag_id']
-
-        cursor.execute("INSERT INTO KnowledgeRequests (author_id, request_text, id_tag) VALUES (?, ?, ?)",
-                       (message.from_user.id, request_text, tag_id))
+        media_file_id = None
+        if message.photo:
+            media_file_id = message.photo[-1].file_id
+        elif message.video:
+            media_file_id = message.video.file_id
+        elif message.voice:
+            media_file_id = message.voice.file_id
+        elif message.document:
+            media_file_id = message.document.file_id
+        cursor.execute(
+            "INSERT INTO KnowledgeRequests (author_id, request_text, request_media, id_tag) VALUES (?, ?, ?, ?)",
+            (message.from_user.id, request_text, media_file_id, tag_id))
         conn.commit()
-
         await message.answer("Запрос был отправлен на проверку!")
-
         await state.finish()
-
     except Exception as e:
         await message.answer(f"Произошла ошибка при добавлении запроса: {e}")
 
@@ -385,12 +399,14 @@ async def process_request_text(message: types.Message, state: FSMContext):
 async def view_all_requests_callback(callback_query: types.CallbackQuery, state: FSMContext):
     try:
         tag_id = callback_query.data.split('_')[-1]
-
         async with state.proxy() as data:
             data['tag_id'] = tag_id
+        # Получение названия тега по его ID
+        cursor.execute("SELECT tag_name FROM Tags WHERE id=?", (tag_id,))
+        tag_name = cursor.fetchone()[0]  # Предполагается, что запрос вернет одну запись
 
         cursor.execute("""
-            SELECT kr.id, kr.request_text, 
+            SELECT kr.id, kr.request_text, kr.request_media,
                    (SELECT COUNT(id) FROM KnowledgeResponses WHERE request_id = kr.id) AS num_responses,
                    EXISTS(SELECT 1 FROM KnowledgeResponses WHERE request_id = kr.id) AS has_responses,
                    kr.votes
@@ -399,23 +415,35 @@ async def view_all_requests_callback(callback_query: types.CallbackQuery, state:
             ORDER BY kr.votes DESC
         """, (tag_id,))
         requests = cursor.fetchall()
-
         if requests:
-            response_text = f"Запросы для тега с id {tag_id}:\n"
             for request in requests:
-                request_id, request_text, num_responses, has_responses, votes = request
-                response_text += f"{request_id}. Запрос: {request_text}\n"
+                request_id, request_text, request_media, num_responses, has_responses, votes = request
+                response_text = f"{request_id}. Запрос: {request_text}\n"
                 response_text += f"Количество ответов: {num_responses}\n"
                 response_text += f"Голосов: {votes}\n"
-                response_text += "\n"
+                if request_media:
+                    if request_media.startswith("AgAC"):
+                        await bot.send_photo(chat_id=callback_query.from_user.id, photo=request_media,
+                                             caption=response_text)
+                    elif request_media.startswith("BQAC"):
+                        await bot.send_video(chat_id=callback_query.from_user.id, video=request_media,
+                                             caption=response_text)
+                    elif request_media.startswith("AwAC"):
+                        await bot.send_voice(chat_id=callback_query.from_user.id, voice=request_media,
+                                             caption=response_text)
+                    elif request_media.startswith("AQAC"):
+                        await bot.send_document(chat_id=callback_query.from_user.id, document=request_media,
+                                                caption=response_text)
+                else:
+                    await bot.send_message(chat_id=callback_query.from_user.id, text=response_text)
         else:
-            response_text = "Для данного тега пока нет запросов."
-
-        if response_text != "Для данного тега пока нет запросов.":
+            response_text = f"Для тега {tag_name} пока нет запросов."
             await bot.send_message(chat_id=callback_query.from_user.id, text=response_text,
                                    reply_markup=await keyboards.check_answers_and_create_answer(tag_id))
-        else:
-            await bot.send_message(chat_id=callback_query.from_user.id, text=response_text)
+        if response_text != f"Для тега {tag_name} пока нет запросов.":
+            await bot.send_message(chat_id=callback_query.from_user.id,
+                                   text='Нажмите на кнопку ниже, что посмотреть ответы.',
+                                   reply_markup=await keyboards.check_answers_and_create_answer(tag_id))
     except Exception as e:
         await bot.send_message(chat_id=callback_query.from_user.id, text=f"Произошла ошибка: {e}")
 
@@ -588,14 +616,14 @@ async def create_response(message: types.Message, state: FSMContext):
         await bot.send_message(chat_id=message.chat.id, text="Ваш ответ сохранен и отправлен на модерацию")
 
         cursor.execute("""
-            SELECT kr.author_id, kr.request_text, t.tag_name
+            SELECT kr.author_id, kr.request_text, t.tag_name, kr.request_media
             FROM KnowledgeRequests kr
             LEFT JOIN Tags t ON kr.id_tag = t.id
             WHERE kr.id = ?
         """, (request_id,))
         request_info = cursor.fetchone()
 
-        request_author_id, request_text, tag_name = request_info
+        request_author_id, request_text, tag_name, request_media = request_info
 
         cursor.execute("SELECT notification_preferences FROM Users WHERE id = ?", (request_author_id,))
         subscription_status = cursor.fetchone()
@@ -605,23 +633,28 @@ async def create_response(message: types.Message, state: FSMContext):
                                     f"Ваш запрос: '{request_text}'\nНазвание тега: {tag_name}\n"
                                     f"ID Пользователя: {message.from_user.id}\n"
                                     f"Его ответ: {response_text}")
+            if request_media:
+                if request_media.startswith("AgAC"):
+                    await bot.send_photo(request_author_id, request_media, caption=notification_message)
+                elif request_media.startswith("BQAC"):
+                    await bot.send_video(request_author_id, request_media, caption=notification_message)
+                elif request_media.startswith("AwAC"):
+                    await bot.send_voice(request_author_id, request_media, caption=notification_message)
+                elif request_media.startswith("AQAC"):
+                    await bot.send_document(request_author_id, request_media, caption=notification_message)
+                elif request_media.startswith("CgAC"):
+                    await bot.send_video_note(request_author_id, request_media, caption=notification_message)
 
             if file_id:
-                await bot.send_message(request_author_id, "Ответ в виде медиафайла: ")
                 if file_id.startswith("AgAC"):
-                    await bot.send_message(request_author_id, notification_message)
                     await bot.send_photo(request_author_id, file_id)
                 elif file_id.startswith("BQAC"):
-                    await bot.send_message(request_author_id, notification_message)
                     await bot.send_video(request_author_id, file_id)
                 elif file_id.startswith("AwAC"):
-                    await bot.send_message(request_author_id, notification_message)
                     await bot.send_voice(request_author_id, file_id)
                 elif file_id.startswith("AQAC"):
-                    await bot.send_message(request_author_id, notification_message)
                     await bot.send_document(request_author_id, file_id)
                 elif file_id.startswith("CgAC"):
-                    await bot.send_message(request_author_id, notification_message)
                     await bot.send_video_note(request_author_id, file_id)
             else:
                 await bot.send_message(request_author_id, notification_message)
