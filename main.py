@@ -32,6 +32,16 @@ class AnswerRequest(StatesGroup):
     waiting_for_response_id = State()
 
 
+class ChangeAnswer(StatesGroup):
+    waiting_for_question_number = State()
+    waiting_for_new_answer = State()
+
+
+class ChangeQuestion(StatesGroup):
+    waiting_for_question_number = State()
+    waiting_for_new_question = State()
+
+
 @dp.message_handler(commands=['start'], state='*')
 async def handler_start(message: types.Message, state: FSMContext):
     verify = cursor.execute('SELECT * FROM Users WHERE id =?', (message.from_user.id,)).fetchone()
@@ -46,9 +56,123 @@ async def handler_start(message: types.Message, state: FSMContext):
         await bot.send_message(chat_id=message.from_user.id, text=sms.profile_user(message.from_user.id),
                                reply_markup=await keyboards.main_menu())
 
+
+@dp.message_handler(commands=['cancel'], state='*')
+async def cancel_operation(message: types.Message, state: FSMContext):
+    await state.finish()
+    await message.answer("Операция отменена.")
+
+
 @dp.message_handler(commands=['a_change'], state='*')
 async def handler_a_change(message: types.Message, state: FSMContext):
-    pass
+    user_id = message.from_user.id
+    cursor.execute("""
+        SELECT kr.id, kr.request_id, kr.response_text, rq.request_text, t.tag_name
+        FROM KnowledgeResponses kr
+        JOIN KnowledgeRequests rq ON kr.request_id = rq.id
+        JOIN Tags t ON rq.id_tag = t.id
+        WHERE kr.author_id=?
+    """, (user_id,))
+    user_responses = cursor.fetchall()
+    if not user_responses:
+        await message.answer("У вас нет ни одного ответа для изменения.")
+        return
+    response_list = "\n".join(
+        [f"{index + 1}. Запрос: {response[3]}\nТег: {response[4]}\nВаш ответ: {response[2]}\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖" for
+         index, response in enumerate(user_responses)])
+    await message.answer("Выберите номер вопроса, который вы хотите изменить\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n/cancel - для отмены\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n" + response_list)
+    await ChangeAnswer.waiting_for_question_number.set()
+
+
+@dp.message_handler(state=ChangeAnswer.waiting_for_question_number)
+async def process_question_number(message: types.Message, state: FSMContext):
+    try:
+        question_number = int(message.text)
+    except ValueError:
+        await message.answer("Пожалуйста, введите корректный номер вопроса.")
+        return
+
+    async with state.proxy() as data:
+        data['question_number'] = question_number
+
+    await message.answer("Введите ваш новый ответ:")
+
+    await ChangeAnswer.waiting_for_new_answer.set()
+
+
+@dp.message_handler(state=ChangeAnswer.waiting_for_new_answer)
+async def process_new_answer(message: types.Message, state: FSMContext):
+    new_answer = message.text
+    if not new_answer:
+        await message.answer("Вы не ввели новый ответ.")
+        return
+
+    async with state.proxy() as data:
+        user_id = message.from_user.id
+        question_number = data['question_number']
+
+    cursor.execute("UPDATE KnowledgeResponses SET response_text=?, moderated=0 WHERE id=? AND author_id=?",
+                   (new_answer, question_number, user_id))
+    conn.commit()
+
+    await message.answer("Ответ успешно изменен и отправлен на проверку.")
+
+    await state.finish()
+
+
+@dp.message_handler(commands=['q_change'], state='*')
+async def handler_q_change(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    cursor.execute("""
+        SELECT kr.id, kr.request_text, kr.id_tag, t.tag_name
+        FROM KnowledgeRequests kr
+        JOIN Tags t ON kr.id_tag = t.id
+        WHERE kr.author_id=?
+    """, (user_id,))
+    user_questions = cursor.fetchall()
+    if not user_questions:
+        await message.answer("У вас нет ни одного вопроса для изменения.")
+        return
+    question_list = "\n".join(
+        [f"{index + 1}. Ваш вопрос: {question[1]}\nТег: {question[3]}\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖" for index, question in
+         enumerate(user_questions)])
+    await message.answer("Выберите номер вопроса, который вы хотите изменить\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n/cancel - для отмены\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n" + question_list)
+    await ChangeQuestion.waiting_for_question_number.set()
+
+
+@dp.message_handler(state=ChangeQuestion.waiting_for_question_number)
+async def process_question_number(message: types.Message, state: FSMContext):
+    try:
+        question_number = int(message.text)
+    except ValueError:
+        await message.answer("Пожалуйста, введите корректный номер вопроса.")
+        return
+    async with state.proxy() as data:
+        data['question_number'] = question_number
+    await message.answer("Введите ваш новый вопрос:")
+    await ChangeQuestion.waiting_for_new_question.set()
+
+
+@dp.message_handler(state=ChangeQuestion.waiting_for_new_question)
+async def process_new_question(message: types.Message, state: FSMContext):
+    new_question = message.text
+    if not new_question:
+        await message.answer("Вы не ввели новый вопрос.")
+        return
+    async with state.proxy() as data:
+        user_id = message.from_user.id
+        question_number = data['question_number']
+    cursor.execute("UPDATE KnowledgeRequests SET request_text=?, moderated=0 WHERE id=? AND author_id=?",
+                   (new_question, question_number, user_id))
+    conn.commit()
+    await message.answer("Вопрос успешно изменен и отправлен на проверку.")
+    await state.finish()
+
+
+@dp.message_handler(commands=['cancel'], state='*')
+async def cancel_operation(message: types.Message, state: FSMContext):
+    await state.finish()
+    await message.answer("Операция отменена.")
 
 
 @dp.message_handler(commands=['help'], state='*')
@@ -58,7 +182,7 @@ async def handler_help(message: types.Message):
 
 @dp.message_handler(commands=['sms'], state='*')
 async def send_message_to_user(message: types.Message):
-    try
+    try:
         from_user_id = message.from_user.id
 
         command_args = message.get_args().split()
