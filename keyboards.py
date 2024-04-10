@@ -26,6 +26,9 @@ async def main_menu():
     search_by_tags_btn = InlineKeyboardButton("Поиск по тегам", callback_data="search_by_tags")
     kb.add(search_by_tags_btn)
 
+    check_raiting_btn = InlineKeyboardButton("Проверить рейтинг", callback_data="check_rating")
+    kb.add(check_raiting_btn)
+
     return kb
 
 
@@ -52,4 +55,11 @@ async def check_answers_and_create_answer(tag_id):
     kb.add(
         InlineKeyboardButton(text="Просмотреть ответы", callback_data=f"check_answers_{tag_id}")
     )
+    return kb
+
+
+async def needed_sms_for_user():
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton(text="Да", callback_data="yes_need_sms"),
+           InlineKeyboardButton(text="Нет", callback_data="no_need_sms"))
     return kb

@@ -40,8 +40,10 @@ cursor.execute('''
 CREATE TABLE IF NOT EXISTS Users (
     id INTEGER PRIMARY KEY,
     username TEXT UNIQUE,
+    needed_sms_for_user INTEGER,
     notification_preferences INTEGER default 0, -- Настройки уведомлений
-    role INTEGER-- Роль пользователя (сотрудник, администратор и т.д.)
+    role INTEGER, -- Роль пользователя (сотрудник, администратор и т.д.)
+    rank_user TEXT default 'Новичок'
 );
 ''')
 
