@@ -58,9 +58,7 @@ async def handler_help(message: types.Message):
 
 @dp.message_handler(commands=['sms'], state='*')
 async def send_message_to_user(message: types.Message):
-    try:
-        # Разбираем аргументы команды
-
+    try
         from_user_id = message.from_user.id
 
         command_args = message.get_args().split()
@@ -92,7 +90,6 @@ async def send_message_to_user(message: types.Message):
 async def my_settings(message: types.Message):
     user_id = message.from_user.id
 
-    # Получаем значения из базы данных
     cursor.execute("SELECT needed_sms_for_user, notification_preferences FROM Users WHERE id=?", (user_id,))
     settings = cursor.fetchone()
 
@@ -265,7 +262,6 @@ async def view_all_requests_callback(callback_query: types.CallbackQuery, state:
     try:
         tag_id = callback_query.data.split('_')[-1]
 
-        # Устанавливаем состояние tag_id
         async with state.proxy() as data:
             data['tag_id'] = tag_id
 
@@ -283,10 +279,10 @@ async def view_all_requests_callback(callback_query: types.CallbackQuery, state:
         if requests:
             response_text = f"Запросы для тега с id {tag_id}:\n"
             for request in requests:
-                request_id, request_text, num_responses, has_responses, votes = request  # Добавлено votes
+                request_id, request_text, num_responses, has_responses, votes = request
                 response_text += f"{request_id}. Запрос: {request_text}\n"
                 response_text += f"Количество ответов: {num_responses}\n"
-                response_text += f"Голосов: {votes}\n"  # Выводим количество голосов
+                response_text += f"Голосов: {votes}\n"
                 response_text += "\n"
         else:
             response_text = "Для данного тега пока нет запросов."
@@ -525,7 +521,6 @@ async def vote_question(callback_query: types.CallbackQuery):
             await bot.answer_callback_query(callback_query.id, text="Вы уже голосовали за этот вопрос!")
         else:
             cursor.execute("UPDATE KnowledgeRequests SET votes = votes + 1 WHERE id = ?", (request_id,))
-            # Записываем голос пользователя
             cursor.execute("INSERT INTO QuestionVotes (user_id, question_id) VALUES (?, ?)", (user_id, request_id))
             conn.commit()
 
