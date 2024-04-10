@@ -67,7 +67,7 @@ async def cancel_operation(message: types.Message, state: FSMContext):
 async def handler_a_change(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     cursor.execute("""
-        SELECT kr.id, kr.request_id, kr.response_text, rq.request_text, t.tag_name
+        SELECT kr.id, kr.request_id, kr.response_text, kr.response_media, rq.request_text, t.tag_name
         FROM KnowledgeResponses kr
         JOIN KnowledgeRequests rq ON kr.request_id = rq.id
         JOIN Tags t ON rq.id_tag = t.id
@@ -77,15 +77,39 @@ async def handler_a_change(message: types.Message, state: FSMContext):
     if not user_responses:
         await message.answer("У вас нет ни одного ответа для изменения.")
         return
-    response_list = "\n".join(
-        [f"{index + 1}. Запрос: {response[3]}\nТег: {response[4]}\nВаш ответ: {response[2]}\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖" for
-         index, response in enumerate(user_responses)])
+
+    for index, response in enumerate(user_responses, start=1):
+        response_message = f"{index}. Запрос: {response[4]}\nТег: {response[5]}\nОтвет: {response[2]}\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
+        if response[3]:
+            media_file_id = response[3]
+            if media_file_id.startswith("AgAC"):
+                await bot.send_photo(chat_id=message.chat.id, photo=media_file_id, caption=response_message)
+            elif media_file_id.startswith("BAAC"):
+                await bot.send_video(chat_id=message.chat.id, video=media_file_id, caption=response_message)
+            elif media_file_id.startswith("AwAC"):
+                await bot.send_voice(chat_id=message.chat.id, voice=media_file_id, caption=response_message)
+            elif media_file_id.startswith("BQAC"):
+                await bot.send_document(chat_id=message.chat.id, document=media_file_id, caption=response_message)
+            elif media_file_id.startswith("DQAC"):
+                await bot.send_message(chat_id=message.chat.id, text=response_message)
+                await bot.send_video_note(chat_id=message.chat.id, video_note=media_file_id)
+        else:
+            await message.answer(response_message)
+
     await message.answer(
-        "Выберите номер вопроса, который вы хотите изменить\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n/cancel - для отмены\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n" + response_list)
+        "Выберите номер ответа, который вы хотите изменить\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n/cancel - для отмены\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n")
+
     await ChangeAnswer.waiting_for_question_number.set()
 
 
-@dp.message_handler(state=ChangeAnswer.waiting_for_question_number)
+@dp.message_handler(state=ChangeAnswer.waiting_for_question_number, content_types=[
+    types.ContentType.TEXT,
+    types.ContentType.DOCUMENT,
+    types.ContentType.PHOTO,
+    types.ContentType.VIDEO,
+    types.ContentType.VOICE,
+    types.ContentType.VIDEO_NOTE
+])
 async def process_question_number(message: types.Message, state: FSMContext):
     try:
         question_number = int(message.text)
@@ -101,23 +125,46 @@ async def process_question_number(message: types.Message, state: FSMContext):
     await ChangeAnswer.waiting_for_new_answer.set()
 
 
-@dp.message_handler(state=ChangeAnswer.waiting_for_new_answer)
+# Обработка медиа-файлов в ответах пользователя
+@dp.message_handler(state=ChangeAnswer.waiting_for_new_answer, content_types=[
+    types.ContentType.TEXT,
+    types.ContentType.DOCUMENT,
+    types.ContentType.PHOTO,
+    types.ContentType.VIDEO,
+    types.ContentType.VOICE,
+    types.ContentType.VIDEO_NOTE
+])
 async def process_new_answer(message: types.Message, state: FSMContext):
+
     new_answer = message.text
-    if not new_answer:
-        await message.answer("Вы не ввели новый ответ.")
-        return
 
     async with state.proxy() as data:
         user_id = message.from_user.id
         question_number = data['question_number']
 
-    cursor.execute("UPDATE KnowledgeResponses SET response_text=?, moderated=0 WHERE id=? AND author_id=?",
-                   (new_answer, question_number, user_id))
+    media_file_id = None
+
+    if message.photo:
+        media_file_id = message.photo[-1].file_id
+    elif message.video:
+        media_file_id = message.video.file_id
+    elif message.voice:
+        media_file_id = message.voice.file_id
+    elif message.document:
+        media_file_id = message.document.file_id
+    elif message.video_note:
+        media_file_id = message.video_note.file_id
+    elif message.text:
+        if not new_answer:
+            await message.answer("Вы не ввели новый ответ.")
+            return
+
+    cursor.execute(
+        "UPDATE KnowledgeResponses SET response_text=?, response_media=?, moderated=0 WHERE id=? AND author_id=?",
+        (new_answer, media_file_id, question_number, user_id))
     conn.commit()
 
     await message.answer("Ответ успешно изменен и отправлен на проверку.")
-
     await state.finish()
 
 
@@ -125,7 +172,7 @@ async def process_new_answer(message: types.Message, state: FSMContext):
 async def handler_q_change(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     cursor.execute("""
-        SELECT kr.id, kr.request_text, kr.id_tag, t.tag_name
+        SELECT kr.id, kr.request_text, kr.request_media, kr.id_tag, t.tag_name
         FROM KnowledgeRequests kr
         JOIN Tags t ON kr.id_tag = t.id
         WHERE kr.author_id=?
@@ -134,15 +181,40 @@ async def handler_q_change(message: types.Message, state: FSMContext):
     if not user_questions:
         await message.answer("У вас нет ни одного вопроса для изменения.")
         return
-    question_list = "\n".join(
-        [f"{index + 1}. Ваш вопрос: {question[1]}\nТег: {question[3]}\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖" for index, question in
-         enumerate(user_questions)])
+
+    for index, question in enumerate(user_questions, start=1):
+        question_message = f"{index}. Ваш вопрос: {question[1]}\nТег: {question[4]}\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
+        if question[2]:
+            media_file_id = question[2]
+            if media_file_id.startswith("AgAC"):
+                await bot.send_photo(chat_id=message.chat.id, photo=media_file_id, caption=question_message)
+            elif media_file_id.startswith("BAAC"):
+                await bot.send_video(chat_id=message.chat.id, video=media_file_id, caption=question_message)
+            elif media_file_id.startswith("AwAC"):
+                await bot.send_voice(chat_id=message.chat.id, voice=media_file_id, caption=question_message)
+            elif media_file_id.startswith("BQAC"):
+                await bot.send_document(chat_id=message.chat.id, document=media_file_id, caption=question_message)
+            elif media_file_id.startswith("DQAC"):
+                await bot.send_message(chat_id=message.chat.id, text=question_message)
+                await bot.send_video_note(chat_id=message.chat.id, video_note=media_file_id)
+        else:
+            await message.answer(question_message)
+
     await message.answer(
-        "Выберите номер вопроса, который вы хотите изменить\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n/cancel - для отмены\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n" + question_list)
+        "Выберите номер вопроса, который вы хотите изменить\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n/cancel - для отмены\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n")
+
     await ChangeQuestion.waiting_for_question_number.set()
 
 
-@dp.message_handler(state=ChangeQuestion.waiting_for_question_number)
+
+@dp.message_handler(state=ChangeQuestion.waiting_for_question_number, content_types=[
+    types.ContentType.TEXT,
+    types.ContentType.DOCUMENT,
+    types.ContentType.PHOTO,
+    types.ContentType.VIDEO,
+    types.ContentType.VOICE,
+    types.ContentType.VIDEO_NOTE
+])
 async def process_question_number(message: types.Message, state: FSMContext):
     try:
         question_number = int(message.text)
@@ -155,17 +227,39 @@ async def process_question_number(message: types.Message, state: FSMContext):
     await ChangeQuestion.waiting_for_new_question.set()
 
 
-@dp.message_handler(state=ChangeQuestion.waiting_for_new_question)
+@dp.message_handler(state=ChangeQuestion.waiting_for_new_question, content_types=[
+    types.ContentType.TEXT,
+    types.ContentType.DOCUMENT,
+    types.ContentType.PHOTO,
+    types.ContentType.VIDEO,
+    types.ContentType.VOICE,
+    types.ContentType.VIDEO_NOTE
+])
 async def process_new_question(message: types.Message, state: FSMContext):
     new_question = message.text
-    if not new_question:
-        await message.answer("Вы не ввели новый вопрос.")
+    media_file_id = None
+
+    if message.photo:
+        media_file_id = message.photo[-1].file_id
+    elif message.video:
+        media_file_id = message.video.file_id
+    elif message.voice:
+        media_file_id = message.voice.file_id
+    elif message.document:
+        media_file_id = message.document.file_id
+    elif message.video_note:
+        media_file_id = message.video_note.file_id
+
+    if not new_question and not media_file_id:
+        await message.answer("Вы не ввели новый вопрос или не прикрепили медиафайл.")
         return
+
     async with state.proxy() as data:
         user_id = message.from_user.id
         question_number = data['question_number']
-    cursor.execute("UPDATE KnowledgeRequests SET request_text=?, moderated=0 WHERE id=? AND author_id=?",
-                   (new_question, question_number, user_id))
+
+    cursor.execute("UPDATE KnowledgeRequests SET request_text=?, request_media=?, moderated=0 WHERE id=? AND author_id=?",
+                   (new_question, media_file_id, question_number, user_id))
     conn.commit()
     await message.answer("Вопрос успешно изменен и отправлен на проверку.")
     await state.finish()
@@ -425,15 +519,18 @@ async def view_all_requests_callback(callback_query: types.CallbackQuery, state:
                     if request_media.startswith("AgAC"):
                         await bot.send_photo(chat_id=callback_query.from_user.id, photo=request_media,
                                              caption=response_text)
-                    elif request_media.startswith("BQAC"):
+                    elif request_media.startswith("BAAC"):
                         await bot.send_video(chat_id=callback_query.from_user.id, video=request_media,
                                              caption=response_text)
                     elif request_media.startswith("AwAC"):
                         await bot.send_voice(chat_id=callback_query.from_user.id, voice=request_media,
                                              caption=response_text)
-                    elif request_media.startswith("AQAC"):
+                    elif request_media.startswith("BQAC"):
                         await bot.send_document(chat_id=callback_query.from_user.id, document=request_media,
                                                 caption=response_text)
+                    elif request_media.startswith("DQAC"):
+                        await bot.send_message(chat_id=message.chat.id, text=response_message)
+                        await bot.send_video_note(chat_id=message.chat.id, video_note=response_media)
                 else:
                     await bot.send_message(chat_id=callback_query.from_user.id, text=response_text)
         else:
@@ -496,15 +593,18 @@ async def process_request_id(message: types.Message, state: FSMContext):
                         if response_media.startswith("AgAC"):
                             await bot.send_photo(chat_id=message.chat.id, photo=response_media,
                                                  caption=response_message)
-                        elif response_media.startswith("BQAC"):
+                        elif response_media.startswith("BAAC"):
                             await bot.send_video(chat_id=message.chat.id, video=response_media,
                                                  caption=response_message)
                         elif response_media.startswith("AwAC"):
                             await bot.send_voice(chat_id=message.chat.id, voice=response_media,
                                                  caption=response_message)
-                        elif response_media.startswith("AQAC"):
+                        elif response_media.startswith("BQAC"):
                             await bot.send_document(chat_id=message.chat.id, document=response_media,
                                                     caption=response_message)
+                        elif response_media.startswith("DQAC"):
+                            await bot.send_message(chat_id=message.chat.id, text=response_message)
+                            await bot.send_video_note(chat_id=message.chat.id, video_note=response_media)
                     else:
                         await bot.send_message(chat_id=message.chat.id, text=response_message)
 
@@ -636,25 +736,26 @@ async def create_response(message: types.Message, state: FSMContext):
             if request_media:
                 if request_media.startswith("AgAC"):
                     await bot.send_photo(request_author_id, request_media, caption=notification_message)
-                elif request_media.startswith("BQAC"):
+                elif request_media.startswith("BAAC"):
                     await bot.send_video(request_author_id, request_media, caption=notification_message)
                 elif request_media.startswith("AwAC"):
                     await bot.send_voice(request_author_id, request_media, caption=notification_message)
                 elif request_media.startswith("AQAC"):
                     await bot.send_document(request_author_id, request_media, caption=notification_message)
-                elif request_media.startswith("CgAC"):
-                    await bot.send_video_note(request_author_id, request_media, caption=notification_message)
+                elif request_media.startswith("DQAC"):
+                    await bot.send_message(chat_id=message.chat.id, text=response_message)
+                    await bot.send_video_note(chat_id=message.chat.id, video_note=response_media)
 
             if file_id:
                 if file_id.startswith("AgAC"):
                     await bot.send_photo(request_author_id, file_id)
-                elif file_id.startswith("BQAC"):
+                elif file_id.startswith("BAAC"):
                     await bot.send_video(request_author_id, file_id)
                 elif file_id.startswith("AwAC"):
                     await bot.send_voice(request_author_id, file_id)
-                elif file_id.startswith("AQAC"):
+                elif file_id.startswith("BQAC"):
                     await bot.send_document(request_author_id, file_id)
-                elif file_id.startswith("CgAC"):
+                elif file_id.startswith("DQAC"):
                     await bot.send_video_note(request_author_id, file_id)
             else:
                 await bot.send_message(request_author_id, notification_message)
