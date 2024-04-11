@@ -2,7 +2,7 @@ import asyncio
 import os
 import sqlite3
 import time
-
+from aiogram.utils.exceptions import BadRequest
 from aiogram import types, Dispatcher, Bot
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
@@ -47,9 +47,10 @@ class ChangeQuestion(StatesGroup):
 async def handler_start(message: types.Message, state: FSMContext):
     await dp.bot.set_my_commands([
         types.BotCommand("start", "♻️ Главное меню"),
-        types.BotCommand("help", "Помощь"),
-        types.BotCommand("login", "Войти как администратор")
+        types.BotCommand("help", "❓ Помощь"),
+        types.BotCommand("login", "🔑 Войти как администратор")
     ])
+    await state.finish()
     check_ban = cursor.execute("SELECT banned FROM Users WHERE id =?", (message.from_user.id,)).fetchone()
     verify = cursor.execute('SELECT * FROM Users WHERE id =?', (message.from_user.id,)).fetchone()
     if not verify:
@@ -61,7 +62,7 @@ async def handler_start(message: types.Message, state: FSMContext):
                                reply_markup=await keyboards.need_notification_or_not())
     else:
         if check_ban[0] == 1:
-            await message.answer("Вы забанены")
+            await message.answer("❌ Вы не можете использовать эту команду, так как вы заблокированы.")
         else:
             await bot.send_message(chat_id=message.from_user.id, text=sms.profile_user(message.from_user.id),
                                    reply_markup=await keyboards.main_menu())
@@ -74,40 +75,40 @@ async def delete_user(message: types.Message, state: FSMContext):
     user_role = cursor.fetchone()
 
     if not user_role or user_role[0] != 1:
-        await message.answer("Вы не являетесь администратором и не имеете доступа к этой команде.")
+        await message.answer("❌ Вы не являетесь администратором и не имеете доступа к этой команде.")
         return
 
     args = message.get_args()
 
     if not args:
         await message.answer(
-            "Вы не указали ID пользователя для удаления. \nИспользуйте команду /delete_user <b>ID пользователя</b>.")
+            "❌ Вы не указали ID пользователя для удаления. \nИспользуйте команду /delete_user <b>ID пользователя</b>.")
         return
 
     try:
         user_id_to_delete = int(args)
     except ValueError:
-        await message.answer("Некорректный формат ID пользователя. Пожалуйста, введите целочисленное значение.")
+        await message.answer("❌ Некорректный формат ID пользователя. Пожалуйста, введите целочисленное значение.")
         return
 
     cursor.execute("SELECT username FROM Users WHERE id=?", (user_id_to_delete,))
     user_to_delete = cursor.fetchone()
 
     if not user_to_delete:
-        await message.answer("Пользователя с указанным ID не существует.")
+        await message.answer("❌ Пользователя с указанным ID не существует.")
         return
 
     cursor.execute("DELETE FROM Users WHERE id=?", (user_id_to_delete,))
     conn.commit()
 
-    await message.answer(f"Пользователь с ID {user_id_to_delete} успешно удален.")
+    await message.answer(f"✅ Пользователь с ID {user_id_to_delete} успешно удален.")
 
 
 @dp.message_handler(commands=['ban_user'], state='*')
 async def handler_ban_user(message: types.Message, state: FSMContext):
     args = message.get_args()
     if not args:
-        await message.answer("Вы не указали ID пользователя. Используйте команду /ban_user <b>ID пользователя</b>.")
+        await message.answer("❌ Вы не указали ID пользователя. Используйте команду /ban_user <b>ID пользователя</b>.")
         return
 
     user_id = args
@@ -115,8 +116,7 @@ async def handler_ban_user(message: types.Message, state: FSMContext):
     cursor.execute("UPDATE Users SET banned = 1 WHERE id=?", (user_id,))
     conn.commit()
 
-    await message.answer(f"Пользователь с ID {user_id} заблокирован.")
-
+    await message.answer(f"✅ Пользователь с ID {user_id} заблокирован.")
 
 
 @dp.message_handler(commands=['check_answers'], state='*', content_types=[
@@ -141,9 +141,9 @@ async def handler_check_answers(message: types.Message, state: FSMContext):
         return
 
     for answer_id, response_text, response_media, author_id, username in unmoderated_answers:
-        answer_message = f"ID ответа: {answer_id}\n" \
-                         f"Автор: @{username} (ID: {author_id})\n" \
-                         f"Ответ: {response_text}\n"
+        answer_message = f"🆔 ID ответа: {answer_id}\n" \
+                         f"👤 Автор: @{username} (ID: {author_id})\n" \
+                         f"💬 Ответ: {response_text}\n"
         if response_media:
             if response_media.startswith("AgAC"):
                 await bot.send_photo(chat_id=message.chat.id, photo=response_media, caption=answer_message)
@@ -167,9 +167,9 @@ async def handler_check_answers(message: types.Message, state: FSMContext):
 async def approve_question(message: types.Message):
     question_id = message.get_args()
     if not question_id.isdigit():
-        await message.answer("Некорректный формат ID вопроса. Пожалуйста, укажите числовое значение ID.")
+        await message.answer("❌ Некорректный формат ID вопроса. Пожалуйста, укажите числовое значение ID.")
         return
-    await message.answer(f"Вопрос с ID {question_id} был принят.")
+    await message.answer(f"✅ Вопрос с ID {question_id} был принят.")
 
     cursor.execute("UPDATE KnowledgeRequests SET moderated = 1 WHERE id = ?", (question_id,))
     conn.commit()
@@ -184,18 +184,40 @@ async def approve_question(message: types.Message):
 
     if result:
         author_id, username = result
-        await bot.send_message(author_id, f"Ваш вопрос с ID {question_id} был принят модератором.")
+
+        media_file = \
+        cursor.execute("SELECT request_media FROM KnowledgeRequests WHERE id = ?", (question_id,)).fetchone()[0]
+
+        caption = f"✅ Ваш вопрос с ID {question_id} был принят модератором.\nВаш запрос находится в прикрепленном файле."
+
+        if media_file:
+            if media_file.startswith("AgAC"):
+                await bot.send_photo(author_id, photo=media_file, caption=caption)
+            elif media_file.startswith("BAAC"):
+                await bot.send_video(author_id, video=media_file, caption=caption)
+            elif media_file.startswith("AwAC"):
+                await bot.send_voice(author_id, voice=media_file, caption=caption)
+            elif media_file.startswith("BQAC"):
+                await bot.send_document(author_id, document=media_file, caption=caption)
+            elif media_file.startswith("DQAC"):
+                await bot.send_message(author_id, caption)
+                await bot.send_video_note(author_id, video_note=media_file, )
+        else:
+            response_text = \
+            cursor.execute("SELECT request_text FROM KnowledgeRequests WHERE id =?", (question_id,)).fetchone()[0]
+            await bot.send_message(author_id,
+                                   f"✅ Ваш вопрос с ID {question_id} был принят модератором.\nВаш запрос: {response_text}.")
     else:
-        await message.answer("Не удалось найти информацию о пользователе, отправившем вопрос.")
+        await message.answer("❌ Не удалось найти информацию о пользователе, отправившем вопрос.")
 
 
 @dp.message_handler(commands=['reject_question'])
 async def reject_question(message: types.Message):
     question_id = message.get_args()
     if not question_id.isdigit():
-        await message.answer("Некорректный формат ID вопроса. Пожалуйста, укажите числовое значение ID.")
+        await message.answer("❌ Некорректный формат ID вопроса. Пожалуйста, укажите числовое значение ID.")
         return
-    await message.answer(f"Вопрос с ID {question_id} был отклонен.")
+    await message.answer(f"✅ Вопрос с ID {question_id} был отклонен.")
 
     cursor.execute("DELETE FROM KnowledgeRequests WHERE id = ?", (question_id,))
     conn.commit()
@@ -209,16 +231,23 @@ async def reject_question(message: types.Message):
 
     if result:
         author_id = result[0]
-        await bot.send_message(author_id, f"Ваш вопрос с ID {question_id} был отклонен модератором.")
+        await bot.send_message(author_id, f"❌ Ваш вопрос с ID {question_id} был отклонен модератором.")
     else:
-        await message.answer("Не удалось найти информацию о пользователе, отправившем вопрос.")
+        await message.answer("❌ Не удалось найти информацию о пользователе, отправившем вопрос.")
 
 
-@dp.message_handler(commands=['approve_answer'])
+@dp.message_handler(commands=['approve_answer'], content_types=[
+    types.ContentType.TEXT,
+    types.ContentType.DOCUMENT,
+    types.ContentType.PHOTO,
+    types.ContentType.VIDEO,
+    types.ContentType.VOICE,
+    types.ContentType.VIDEO_NOTE
+])
 async def approve_answer(message: types.Message, state: FSMContext):
     answer_id = message.get_args()
     if not answer_id.isdigit():
-        await message.answer("Некорректный формат ID ответа. Пожалуйста, укажите числовое значение ID.")
+        await message.answer("❌ Некорректный формат ID ответа. Пожалуйста, укажите числовое значение ID.")
         return
 
     cursor.execute("UPDATE KnowledgeResponses SET moderated = 1 WHERE id = ?", (answer_id,))
@@ -226,70 +255,100 @@ async def approve_answer(message: types.Message, state: FSMContext):
 
     cursor.execute("""
         SELECT kr.author_id, kr.request_id, kr.response_text, kr.response_media,
-               rq.author_id AS request_author_id, rq.request_text, t.tag_name
+               rq.author_id AS request_author_id, rq.request_text, t.tag_name, u.username
         FROM KnowledgeResponses kr
         JOIN KnowledgeRequests rq ON kr.request_id = rq.id
         LEFT JOIN Tags t ON rq.id_tag = t.id
+        JOIN Users u ON kr.author_id = u.id
         WHERE kr.id = ?
     """, (answer_id,))
     result = cursor.fetchone()
 
     if result:
-        author_id, request_id, response_text, response_media, request_author_id, request_text, tag_name = result
+        author_id, request_id, response_text, response_media, request_author_id, request_text, tag_name, author_username = result
 
         if response_media:
             if response_media.startswith("AgAC"):
-                await bot.send_photo(request_author_id, response_media,
-                                     caption=f"Ваш запрос: '{request_text}'\nНазвание тега: {tag_name}\n"
-                                             f"ID Пользователя: {message.from_user.id}\n\n"
-                                             f"Имя пользователя: @{message.from_user.username}\n"
-                                             f"Его ответ: {response_text}")
-            elif response_media.startswith("BAAC"):
-                await bot.send_video(request_author_id, response_media,
-                                     caption=f"Ваш запрос: '{request_text}'\nНазвание тега: {tag_name}\n"
-                                             f"ID Пользователя: {message.from_user.id}\n\n"
-                                             f"Имя пользователя: @{message.from_user.username}\n"
-                                             f"Его ответ: {response_text}")
-            elif response_media.startswith("AwAC"):
-                await bot.send_voice(request_author_id, response_media,
-                                     caption=f"Ваш запрос: '{request_text}'\nНазвание тега: {tag_name}\n"
-                                             f"ID Пользователя: {message.from_user.id}\n\n"
-                                             f"Имя пользователя: @{message.from_user.username}\n"
-                                             f"Его ответ: {response_text}")
-            elif response_media.startswith("AQAC"):
-                await bot.send_document(request_author_id, response_media,
-                                        caption=f"Ваш запрос: '{request_text}'\nНазвание тега: {tag_name}\n"
-                                                f"ID Пользователя: {message.from_user.id}\n\n"
-                                                f"Имя пользователя: @{message.from_user.username}\n"
-                                                f"Его ответ: {response_text}")
-            elif response_media.startswith("DQAC"):
-                await bot.send_message(request_author_id,
-                                       f"Ваш запрос: '{request_text}'\nНазвание тега: {tag_name}\n"
-                                       f"ID Пользователя: {message.from_user.id}\n\n"
-                                       f"Имя пользователя: @{message.from_user.username}\n"
-                                       f"Его ответ: {response_text}")
-                await bot.send_video_note(request_author_id, response_media)
-        else:
-            await bot.send_message(request_author_id,
-                                   f"Ваш запрос: '{request_text}'\nНазвание тега: {tag_name}\n"
-                                   f"ID Пользователя: {message.from_user.id}\n\n"
-                                   f"Имя пользователя: @{message.from_user.username}\n"
-                                   f"Его ответ: {response_text}")
+                await bot.send_photo(author_id, response_media, caption=f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ прикреплен к сообщению.")
 
-        await message.answer("Ответ успешно принят и отправлен автору запроса.")
+                await bot.send_photo(request_author_id, response_media,
+                                     caption=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
+                                             f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
+                                             f"👤 Имя пользователя: @{author_username}\n" \
+                                             f"💬 Его ответ: {response_text}")
+            elif response_media.startswith("BAAC"):
+                await bot.send_video(author_id, response_media, caption=f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ прикреплен к сообщению.")
+
+                await bot.send_video(request_author_id, response_media,
+                                     caption=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
+                                             f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
+                                             f"👤 Имя пользователя: @{author_username}\n" \
+                                             f"💬 Его ответ: {response_text}")
+            elif response_media.startswith("AwAC"):
+                try:
+                    await bot.send_voice(author_id, response_media, caption=f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ прикреплен к сообщению.")
+                except BadRequest as e:
+                    await bot.send_message(author_id, text=f"✅ Ваш ответ к тегу {tag_name} был принят.")
+                try:
+                    await bot.send_voice(request_author_id, response_media,
+                                         caption=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
+                                                 f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
+                                                 f"👤 Имя пользователя: @{author_username}\n" \
+                                                 f"💬 Его ответ: {response_text}")
+                except BadRequest as e:
+                    await bot.send_message(request_author_id,
+                                           text=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
+                                                 f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
+                                                 f"👤 Имя пользователя: @{author_username}\n" \
+                                                 f"💬 Его ответ: {response_text}")
+            elif response_media.startswith("BQAC"):
+                await bot.send_document(author_id, response_media, caption=f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ прикреплен к сообщению.")
+
+                await bot.send_document(request_author_id, response_media,
+                                        caption=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
+                                                f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
+                                                f"👤 Имя пользователя: @{author_username}\n" \
+                                                f"💬 Его ответ: {response_text}")
+            elif response_media.startswith("DQAC"):
+                try:
+                    await bot.send_message(author_id, f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ: ")
+                    await bot.send_video_note(author_id, response_media)
+                except BadRequest as e:
+                    await bot.send_message(author_id, text=f"✅ Ваш ответ к тегу {tag_name} был принят.")
+
+                try:
+                    await bot.send_message(request_author_id,
+                                           text=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
+                                                f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
+                                                f"👤 Имя пользователя: @{author_username}\n" \
+                                                f"💬 Его ответ: {response_text}")
+                    await bot.send_video_note(request_author_id, response_media)
+                except BadRequest as e:
+                    await bot.send_message(request_author_id,
+                                           text=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
+                                                 f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
+                                                 f"👤 Имя пользователя: @{author_username}\n" \
+                                                 f"💬 Его ответ: {response_text}")
+        else:
+            await bot.send_message(author_id, f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ: {response_text}")
+
+            await bot.send_message(request_author_id,
+                                   text=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
+                                        f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
+                                        f"👤 Имя пользователя: @{author_username}\n" \
+                                        f"💬 Его ответ: {response_text}")
+
+        await message.answer("✅ Ответ успешно принят и отправлен автору запроса.")
     else:
-        await message.answer("Не удалось найти информацию об ответе.")
+        await message.answer("❌ Не удалось найти информацию об ответе.")
 
 
 @dp.message_handler(commands=['reject_answer'])
 async def reject_answer(message: types.Message):
     answer_id = message.get_args()
     if not answer_id.isdigit():
-        await message.answer("Некорректный формат ID ответа. Пожалуйста, укажите числовое значение ID.")
+        await message.answer("❌ Некорректный формат ID ответа. Пожалуйста, укажите числовое значение ID.")
         return
-
-    cursor.execute("DELETE FROM KnowledgeResponses WHERE id = ?", (answer_id,))
-    conn.commit()
 
     cursor.execute("""
         SELECT author_id
@@ -300,13 +359,13 @@ async def reject_answer(message: types.Message):
 
     if result:
         author_id = result[0]
-        await bot.send_message(author_id, f"Ваш ответ с ID {answer_id} был отклонен модератором.")
-        await message.answer("Ответ успешно отклонен.")
+        await bot.send_message(author_id, f"❌ Ваш ответ с ID {answer_id} был отклонен модератором.")
+        await message.answer("✅ Ответ успешно отклонен.")
+
+        cursor.execute("DELETE FROM KnowledgeResponses WHERE id = ?", (answer_id,))
+        conn.commit()
     else:
-        await message.answer("Не удалось найти информацию об ответе.")
-
-
-
+        await message.answer("❌ Не удалось найти информацию об ответе.")
 
 
 @dp.message_handler(commands=['check_questions'], state='*', content_types=[
@@ -332,9 +391,9 @@ async def handler_check_questions(message: types.Message, state: FSMContext):
         return
 
     for question_id, request_text, request_media, author_id, username in unmoderated_questions:
-        question_message = f"ID вопроса: {question_id}\n" \
-                           f"Автор: @{username} (ID: {author_id})\n" \
-                           f"Вопрос: {request_text}\n"
+        question_message = f"🆔 ID вопроса: {question_id}\n" \
+                           f"👤 Автор: @{username} (ID: <code>{author_id}</code>)\n" \
+                           f"💬 Вопрос: {request_text}\n"
         if request_media:
             if request_media.startswith("AgAC"):
                 await bot.send_photo(chat_id=message.chat.id, photo=request_media, caption=question_message)
@@ -354,15 +413,16 @@ async def handler_check_questions(message: types.Message, state: FSMContext):
                          "/reject_question <b>ID</b>.")
 
 
-
 @dp.message_handler(commands=['mailing'], state='*')
 async def handler_mailing(message: types.Message, state: FSMContext):
     args = message.get_args()
     if not args:
-        await message.answer("Вы не указали текст сообщения. Используйте команду /mailing <текст сообщения>.")
+        await message.answer("❌ Вы не указали текст сообщения. Используйте команду /mailing <текст сообщения>.")
         return
 
     sms_text = args
+
+    sms_text = f"💬 Рассылка: {sms_text}"
 
     cursor.execute("SELECT id FROM Users")
     user_ids = cursor.fetchall()
@@ -373,14 +433,14 @@ async def handler_mailing(message: types.Message, state: FSMContext):
         except Exception as e:
             print(f"Ошибка при отправке сообщения пользователю с ID {user_id[0]}: {e}")
 
-    await message.answer("Рассылка завершена.")
+    await message.answer("✅ Рассылка завершена.")
 
 
 @dp.message_handler(commands=['unban_user'], state='*')
 async def handler_unban_user(message: types.Message, state: FSMContext):
     args = message.get_args()
     if not args:
-        await message.answer("Вы не указали ID пользователя. Используйте команду /unban_user <b>ID пользователя</b>.")
+        await message.answer("❌ Вы не указали ID пользователя. Используйте команду /unban_user <b>ID пользователя</b>.")
         return
 
     user_id = args
@@ -388,21 +448,22 @@ async def handler_unban_user(message: types.Message, state: FSMContext):
     cursor.execute("UPDATE Users SET banned = 0 WHERE id=?", (user_id,))
     conn.commit()
 
-    await message.answer(f"Пользователь с ID {user_id} разблокирован.")
+    await message.answer(f"✅ Пользователь с ID {user_id} разблокирован.")
 
 
 @dp.message_handler(commands=['sms_user'], state='*')
 async def handler_sms_user(message: types.Message, state: FSMContext):
     args = message.get_args()
     if not args:
-        await message.answer("Вы не указали ID пользователя и текст сообщения.\n"
+        await message.answer("❌ Вы не указали ID пользователя и текст сообщения.\n"
                              "Используйте команду /sms_user <b>ID пользователя</b> <b>текст сообщения</b>.")
         return
 
     try:
         user_id, sms_text = args.split(maxsplit=1)
     except ValueError:
-        await message.answer("Некорректный формат. Используйте команду /sms_user <ID пользователя> <текст сообщения>.")
+        await message.answer(
+            "❌ Некорректный формат. Используйте команду /sms_user <b>ID пользователя</b> <b>текст сообщения</b>.")
         return
 
     cursor.execute("SELECT username FROM Users WHERE id=?", (user_id,))
@@ -412,17 +473,17 @@ async def handler_sms_user(message: types.Message, state: FSMContext):
     else:
         username = "неизвестно"
 
-    sms_text = f"Сообщение от администратора:\n{sms_text}"
+    sms_text = f"💬 Сообщение от администратора:\n{sms_text}"
 
     await bot.send_message(chat_id=user_id, text=sms_text)
-    await message.answer(f"Сообщение отправлено пользователю с ID {user_id} ({username}).")
+    await message.answer(f"✅ Сообщение отправлено пользователю с ID {user_id} ({username}).")
 
 
 @dp.message_handler(commands=['login'], state='*')
 async def handler_login_admin(message: types.Message, state: FSMContext):
     args = message.get_args()
     if not args:
-        await message.answer("Вы не указали пароль. Используйте команду /login <b>пароль</b>.")
+        await message.answer("❌ Вы не указали пароль. Используйте команду /login <b>пароль</b>.")
         return
 
     user_id = message.from_user.id
@@ -431,15 +492,15 @@ async def handler_login_admin(message: types.Message, state: FSMContext):
     admin_password = cursor.fetchone()
 
     if not admin_password:
-        await message.answer("У вас нет прав администратора.")
+        await message.answer("❌ У вас нет прав администратора.")
         return
 
     if args == admin_password[0]:
-        await message.answer("Вы успешно вошли в систему как администратор.")
+        await message.answer("✅ Вы успешно вошли в систему как администратор.")
         cursor.execute("UPDATE Users SET role = 1 WHERE id =?", (user_id,))
         conn.commit()
     else:
-        await message.answer("Неверный пароль. Попробуйте еще раз.")
+        await message.answer("❌ Неверный пароль. Попробуйте еще раз.")
 
 
 @dp.message_handler(commands=['admin_help'], state='*')
@@ -470,11 +531,11 @@ async def handler_users(message: types.Message, state: FSMContext):
                 username = "неизвестно"
             else:
                 username = f"@{username}"
-            users_message += f"ID: {user_id}\n" \
-                             f"Имя пользователя: {username}\n" \
-                             f"Ранг: {rank_user}\n" \
-                             f"Запросов на знания: {total_requests}\n" \
-                             f"Ответов: {total_responses}\n" \
+            users_message += f"🆔 ID: {user_id}\n" \
+                             f"👤 Имя пользователя: {username}\n" \
+                             f"🏅 Ранг: {rank_user}\n" \
+                             f"💡 Запросов на знания: {total_requests}\n" \
+                             f"💬 Ответов: {total_responses}\n" \
                              "➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
             file.write(users_message)
 
@@ -489,7 +550,7 @@ async def handler_users(message: types.Message, state: FSMContext):
 @dp.message_handler(commands=['cancel'], state='*')
 async def cancel_operation(message: types.Message, state: FSMContext):
     await state.finish()
-    await message.answer("Операция отменена.")
+    await message.answer("✅ Операция отменена.")
 
 
 @dp.message_handler(commands=['a_change'], state='*')
@@ -504,7 +565,7 @@ async def handler_a_change(message: types.Message, state: FSMContext):
     """, (user_id,))
     user_responses = cursor.fetchall()
     if not user_responses:
-        await message.answer("У вас нет ни одного ответа для изменения.")
+        await message.answer("❌ У вас нет ни одного ответа для изменения.")
         return
 
     for index, response in enumerate(user_responses, start=1):
@@ -543,7 +604,7 @@ async def process_question_number(message: types.Message, state: FSMContext):
     try:
         question_number = int(message.text)
     except ValueError:
-        await message.answer("Пожалуйста, введите корректный номер вопроса.")
+        await message.answer("❌ Пожалуйста, введите корректный номер вопроса.")
         return
 
     async with state.proxy() as data:
@@ -583,7 +644,7 @@ async def process_new_answer(message: types.Message, state: FSMContext):
         media_file_id = message.video_note.file_id
     elif message.text:
         if not new_answer:
-            await message.answer("Вы не ввели новый ответ.")
+            await message.answer("❌ Вы не ввели новый ответ.")
             return
 
     cursor.execute(
@@ -591,14 +652,14 @@ async def process_new_answer(message: types.Message, state: FSMContext):
         (new_answer, media_file_id, question_number, user_id))
     conn.commit()
 
-    await message.answer("Ответ успешно изменен и отправлен на проверку.")
+    await message.answer("✅ Ответ успешно изменен и отправлен на проверку.")
 
     all_admins = cursor.execute("SELECT user_id FROM Admins").fetchall()
     for admin in all_admins:
-        await bot.send_message(chat_id=admin[0], text=f"Новый ответ от пользователя {message.from_user.id}.\n\n"
-                                                      f"Запрос: {new_answer}\n\n"
-                                                      f"Ответ: {new_answer}\n\n"
-                                                      f"ID: {question_number}")
+        await bot.send_message(chat_id=admin[0], text=f"📩 Новый ответ от пользователя {message.from_user.id}.\n\n"
+                                                      f"💭 Запрос: {new_answer}\n\n"
+                                                      f"📖 Ответ: {new_answer}\n\n"
+                                                      f"🆔 ID: {question_number}")
 
     await state.finish()
 
@@ -614,7 +675,7 @@ async def handler_q_change(message: types.Message, state: FSMContext):
     """, (user_id,))
     user_questions = cursor.fetchall()
     if not user_questions:
-        await message.answer("У вас нет ни одного вопроса для изменения.")
+        await message.answer("❌ У вас нет ни одного вопроса для изменения.")
         return
 
     for index, question in enumerate(user_questions, start=1):
@@ -653,7 +714,7 @@ async def process_question_number(message: types.Message, state: FSMContext):
     try:
         question_number = int(message.text)
     except ValueError:
-        await message.answer("Пожалуйста, введите корректный номер вопроса.")
+        await message.answer("❌ Пожалуйста, введите корректный номер вопроса.")
         return
     async with state.proxy() as data:
         data['question_number'] = question_number
@@ -685,7 +746,7 @@ async def process_new_question(message: types.Message, state: FSMContext):
         media_file_id = message.video_note.file_id
 
     if not new_question and not media_file_id:
-        await message.answer("Вы не ввели новый вопрос или не прикрепили медиафайл.")
+        await message.answer("❌ Вы не ввели новый вопрос или не прикрепили медиафайл.")
         return
 
     async with state.proxy() as data:
@@ -696,11 +757,11 @@ async def process_new_question(message: types.Message, state: FSMContext):
         "UPDATE KnowledgeRequests SET request_text=?, request_media=?, moderated=0 WHERE id=? AND author_id=?",
         (new_question, media_file_id, question_number, user_id))
     conn.commit()
-    await message.answer("Вопрос успешно изменен и отправлен на проверку.")
+    await message.answer("✅ Вопрос успешно изменен и отправлен на проверку.")
 
     admins = cursor.execute("SELECT user_id FROM Admins").fetchall()
     for admin in admins:
-        await bot.send_message(chat_id=admin[0], text=f"Вопрос {question_number} изменен пользователем {user_id}.")
+        await bot.send_message(chat_id=admin[0], text=f"📩 Вопрос {question_number} изменен пользователем {user_id}.")
     await state.finish()
 
 
@@ -722,27 +783,34 @@ async def send_message_to_user(message: types.Message):
 
         command_args = message.get_args().split()
         if len(command_args) < 2:
-            await message.reply("Неверный формат команды. Используйте /sms {user_id} {текст}")
+            await message.reply("❌ Неверный формат команды. Используйте /sms {user_id|username} {текст}")
             return
 
-        user_id = int(command_args[0])
+        receiver = command_args[0]
         text = ' '.join(command_args[1:])
 
-        verify_try = cursor.execute("SELECT needed_sms_for_user FROM Users WHERE id =?", (user_id,)).fetchone()[0]
-
-        user = await bot.get_chat(user_id)
-        if user:
-            if verify_try == 1:
-                await bot.send_message(user_id,
-                                       f"Сообщение от пользователя.\nID пользователя: {from_user_id}\nТекст: {text}")
-                await message.reply("Сообщение успешно отправлено.")
-            else:
-                await message.reply("Пользователь отключил функцию получения сообщений.")
+        # Проверяем, является ли receiver числом (user_id)
+        if receiver.isdigit():
+            receiver_id = int(receiver)
+            user = await bot.get_chat(receiver_id)
         else:
-            await message.reply("Пользователь с указанным ID не найден.")
+            # Иначе ищем пользователя по username
+            user = await bot.get_chat(receiver)
+
+        if user:
+            verify_try = cursor.execute("SELECT needed_sms_for_user FROM Users WHERE id =?", (user.id,)).fetchone()[0]
+
+            if verify_try == 1:
+                await bot.send_message(user.id,
+                                       f"📩 Сообщение от пользователя.\n🆔 ID пользователя: <code>{from_user_id}</code>\nТекст: {text}")
+                await message.reply("✅ Сообщение успешно отправлено.")
+            else:
+                await message.reply("❌ Пользователь отключил функцию получения сообщений.")
+        else:
+            await message.reply("❌ Пользователь не найден.")
 
     except Exception as e:
-        await message.reply(f"Произошла ошибка: {e}")
+        await message.reply(f"❌ Произошла ошибка: {e}")
 
 
 @dp.message_handler(commands=['my_settings'], state='*')
@@ -756,11 +824,11 @@ async def my_settings(message: types.Message):
 
     text = "➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
     if needed_sms_for_user == 0:
-        text += "На данный момент вы не хотите получать сообщения от пользователей.\n"
+        text += "❌ На данный момент вы не хотите получать сообщения от пользователей.\n"
     else:
-        text += "На данный момент вы получаете сообщения от пользователей.\n"
+        text += "✅ На данный момент вы получаете сообщения от пользователей.\n"
     text += "➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
-    text += "Хотите ли вы получать сообщения от пользователей?\n"
+    text += "❓ Хотите ли вы получать сообщения от пользователей?\n"
     text += '➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n'
 
     keyboard_sms = InlineKeyboardMarkup()
@@ -774,12 +842,12 @@ async def my_settings(message: types.Message):
     text = '➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n'
 
     if notification_preferences == 0:
-        text += 'На данный момент вы не подписаны на рассылку.\n'
+        text += '❌ На данный момент вы не подписаны на рассылку.\n'
     else:
-        text += 'На данный момент вы подписаны на рассылку.\n'
+        text += '✅ На данный момент вы подписаны на рассылку.\n'
 
     text += '➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n'
-    text += 'Хотите ли вы подписаться на рассылку?\n'
+    text += '❓ Хотите ли вы подписаться на рассылку?\n'
     text += '➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n'
 
     keyboard_notification = InlineKeyboardMarkup()
@@ -813,14 +881,14 @@ async def check_rating(callback_query: types.CallbackQuery):
         if top_users:
             rating_message = "Топ-5 пользователей с наибольшим количеством голосов:\n"
             for idx, (author_id, total_votes) in enumerate(top_users, start=1):
-                rating_message += f"{idx}. Пользователь ID {author_id}: {total_votes} голосов\n"
+                rating_message += f"{idx} место.\n🆔 Пользователь ID {author_id}\n🗳 Всего {total_votes} голосов\n⭐️ Звание: {cursor.execute('SELECT rank_user FROM Users WHERE id =?', (author_id,)).fetchone()[0]}\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
         else:
-            rating_message = "Пока нет данных о рейтинге."
+            rating_message = "❌ Пока нет данных о рейтинге."
 
         await bot.send_message(callback_query.from_user.id, rating_message)
 
     except Exception as e:
-        await bot.send_message(callback_query.from_user.id, f"Произошла ошибка: {e}")
+        await bot.send_message(callback_query.from_user.id, f"❌ Произошла ошибка: {e}")
 
 
 @dp.callback_query_handler(lambda callback_query: callback_query.data.startswith('select_tag_'))
@@ -837,7 +905,7 @@ async def select_tag(callback_query: types.CallbackQuery, state: FSMContext):
                                reply_markup=await keyboards.button_for_tags(tag_id))
     except Exception as e:
         await bot.send_message(chat_id=callback_query.from_user.id,
-                               text=f"Произошла ошибка: {e}")
+                               text=f"❌ Произошла ошибка: {e}")
 
 
 @dp.callback_query_handler(lambda callback_query: callback_query.data.startswith('my_requests_'))
@@ -859,15 +927,24 @@ async def my_requests(callback_query: types.CallbackQuery):
             response_text = "Ваши запросы:\n"
             for idx, request in enumerate(user_requests, start=1):
                 request_text, request_media, votes, timestamp, moderated = request
-                response_text += f"Запрос: {request_text}\n"
-                response_text += f"Номер запроса: {idx}\n"
+                response_text += f"🔍 Запрос: {request_text}\n"
+                response_text += f"🔢 Номер запроса: {idx}\n"
                 if request_media:
-                    response_text += f"Медиа: {request_media}\n"
-                response_text += f"Голоса: {votes}\n"
-                response_text += f"Время создания: {timestamp}\n"
-                response_text += f"Модерировано: {'Да' if moderated else 'Нет'}\n\n"
+                    if request_media.startswith("AgAC"):
+                        await bot.send_photo(chat_id=user_id, photo=request_media)
+                    elif request_media.startswith("BAAC"):
+                        await bot.send_video(chat_id=user_id, video=request_media)
+                    elif request_media.startswith("AwAC"):
+                        await bot.send_voice(chat_id=user_id, voice=request_media)
+                    elif request_media.startswith("BQAC"):
+                        await bot.send_document(chat_id=user_id, document=request_media)
+                    elif request_media.startswith("DQAC"):
+                        await bot.send_video_note(chat_id=user_id, video_note=request_media)
+                response_text += f"👍 Голоса: {votes}\n"
+                response_text += f"🕒 Время создания: {timestamp}\n"
+                response_text += f"🛡 Модерировано: {'Да' if moderated else 'Нет'}\n\n"
         else:
-            response_text = "У вас пока нет запросов по данному тегу."
+            response_text = "❌ У вас пока нет запросов по данному тегу."
 
         if user_requests and any(request[2] != 0 for request in user_requests):
             await bot.send_message(chat_id=user_id, text=response_text, reply_markup=await keyboards.check_my_answer())
@@ -876,7 +953,7 @@ async def my_requests(callback_query: types.CallbackQuery):
 
     except Exception as e:
         await bot.send_message(chat_id=callback_query.from_user.id,
-                               text=f"Произошла ошибка: {e}")
+                               text=f"❌ Произошла ошибка: {e}")
 
 
 @dp.callback_query_handler(lambda callback_query: callback_query.data.startswith('create_request_'), state='*')
@@ -892,7 +969,7 @@ async def create_request(callback_query: types.CallbackQuery, state: FSMContext)
                                text="Введите текст нового запроса или отправьте файл вашего запроса:")
     except Exception as e:
         await bot.send_message(chat_id=callback_query.from_user.id,
-                               text=f"Произошла ошибка: {e}")
+                               text=f"❌ Произошла ошибка: {e}")
 
 
 @dp.message_handler(state=EnterRequestText.waiting_for_request_text, content_types=[
@@ -909,6 +986,7 @@ async def process_request_text(message: types.Message, state: FSMContext):
         request_text = message.text.strip() if message.text else ""
         async with state.proxy() as data:
             tag_id = data['tag_id']
+
         media_file_id = None
         if message.photo:
             media_file_id = message.photo[-1].file_id
@@ -920,17 +998,46 @@ async def process_request_text(message: types.Message, state: FSMContext):
             media_file_id = message.document.file_id
         elif message.video_note:
             media_file_id = message.video_note.file_id
+
         cursor.execute(
             "INSERT INTO KnowledgeRequests (author_id, request_text, request_media, id_tag) VALUES (?, ?, ?, ?)",
             (message.from_user.id, request_text, media_file_id, tag_id))
         conn.commit()
-        await message.answer("Запрос был отправлен на проверку!")
+
+        text_tag = cursor.execute("SELECT tag_name FROM Tags WHERE id =?", (tag_id,)).fetchone()[0]
+
+        request_id = cursor.execute("SELECT id FROM KnowledgeRequests WHERE author_id =? AND id_tag =?",
+                                    (message.from_user.id, tag_id)).fetchone()[0]
+
+        await message.answer("✅ Запрос был отправлен на проверку!")
+
         admins = cursor.execute("SELECT user_id FROM Admins").fetchall()
         for admin in admins:
-            await bot.send_message(chat_id=admin[0], text=f"Новый запрос: {request_text}")
+            if media_file_id:
+                if media_file_id.startswith("AgAC"):
+                    await bot.send_photo(chat_id=admin[0], photo=media_file_id,
+                                         caption=f"📖 Новый запрос для тега {text_tag}: {request_text}\n<code>/approve_question {request_id}</code> или <code>/reject_question {request_id}</code>")
+                elif media_file_id.startswith("BAAC"):
+                    await bot.send_video(chat_id=admin[0], video=media_file_id,
+                                         caption=f"📖📖 Новый запрос для тега {text_tag}: {request_text}\n<code>/approve_question {request_id}</code> или <code>/reject_question {request_id}</code>")
+                elif media_file_id.startswith("AwAC"):
+                    await bot.send_voice(chat_id=admin[0], voice=media_file_id,
+                                         caption=f"📖 Новый запрос для тега {text_tag}: {request_text}\n<code>/approve_question {request_id}</code> или <code>/reject_question {request_id}</code>")
+                elif media_file_id.startswith("BQAC"):
+                    await bot.send_document(chat_id=admin[0], document=media_file_id,
+                                            caption=f"📖 Новый запрос для тега {text_tag}: {request_text}\n<code>/approve_question {request_id}</code> или <code>/reject_question {request_id}</code>")
+                elif media_file_id.startswith("DQAC"):
+                    await bot.send_video_note(chat_id=admin[0], video_note=media_file_id)
+                    await bot.send_message(chat_id=admin[0],
+                                           text=f"📖 Новый запрос для тега {text_tag}: {request_text}\n<code>/approve_question {request_id}</code> или <code>/reject_question {request_id}</code>")
+            else:
+                await bot.send_message(chat_id=admin[0],
+                                       text=f"📖 Новый запрос для тега {text_tag}: {request_text}\n<code>/approve_question {request_id}</code> или <code>/reject_question {request_id}</code>")
+
         await state.finish()
+
     except Exception as e:
-        await message.answer(f"Произошла ошибка при добавлении запроса: {e}")
+        await message.answer(f"❌ Произошла ошибка при добавлении запроса: {e}")
 
 
 @dp.callback_query_handler(lambda callback_query: callback_query.data.startswith('view_all_requests_'))
@@ -952,12 +1059,13 @@ async def view_all_requests_callback(callback_query: types.CallbackQuery, state:
             ORDER BY kr.votes DESC
         """, (tag_id,))
         requests = cursor.fetchall()
+        response_text = ""
         if requests:
             for request in requests:
                 request_id, request_text, request_media, num_responses, has_responses, votes = request
-                response_text = f"{request_id}. Запрос: {request_text}\n"
-                response_text += f"Количество ответов: {num_responses}\n"
-                response_text += f"Голосов: {votes}\n"
+                response_text = f"🆔 {request_id}. Запрос: {request_text}\n"
+                response_text += f"💬 Количество ответов: {num_responses}\n"
+                response_text += f"👍 Голосов: {votes}\n"
                 if request_media:
                     if request_media.startswith("AgAC"):
                         await bot.send_photo(chat_id=callback_query.from_user.id, photo=request_media,
@@ -977,15 +1085,20 @@ async def view_all_requests_callback(callback_query: types.CallbackQuery, state:
                 else:
                     await bot.send_message(chat_id=callback_query.from_user.id, text=response_text)
         else:
-            response_text = f"Для тега {tag_name} пока нет запросов."
+            kb = InlineKeyboardMarkup()
+            create_request_button = InlineKeyboardButton(text="Создать запрос",
+                                                         callback_data=f"create_request_{tag_id}")
+            kb.add(create_request_button)
+
+            response_text = f"❌ Для тега {tag_name} пока нет запросов."
             await bot.send_message(chat_id=callback_query.from_user.id, text=response_text,
-                                   reply_markup=await keyboards.check_answers_and_create_answer(tag_id))
-        if response_text != f"Для тега {tag_name} пока нет запросов.":
+                                   reply_markup=kb)
+        if response_text != f"❌ Для тега {tag_name} пока нет запросов.":
             await bot.send_message(chat_id=callback_query.from_user.id,
                                    text='Нажмите на кнопку ниже, что посмотреть ответы.',
                                    reply_markup=await keyboards.check_answers_and_create_answer(tag_id))
     except Exception as e:
-        await bot.send_message(chat_id=callback_query.from_user.id, text=f"Произошла ошибка: {e}")
+        await bot.send_message(chat_id=callback_query.from_user.id, text=f"❌ Произошла ошибка: {e}")
 
 
 @dp.message_handler(state=AnswerRequest.waiting_for_request_id)
@@ -1022,16 +1135,16 @@ async def process_request_id(message: types.Message, state: FSMContext):
 
             if responses:
                 await bot.send_message(chat_id=message.chat.id, text=f"➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
-                                                                     f"ID Тега: {tag_id}\n"
-                                                                     f"Название тега: {tag_name}\n"
-                                                                     f"Запрос: {request_text}\n"
+                                                                     f"🏷️ ID Тега: {tag_id}\n"
+                                                                     f"🏷️ Название тега: {tag_name}\n"
+                                                                     f"📝 Запрос: {request_text}\n"
                                                                      f"➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
-                                                                     f"Ответы:\n"
+                                                                     f"📃 Ответы:\n"
                                                                      f"➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n")
                 for idx, (temp_response_text, response_media, author_id, timestamp, votes, response_id) in enumerate(
                         responses, start=1):
-                    response_message = f"Номер ответа: {response_id}.\nID Пользователя: {author_id}\nКоличество голосов: {votes}\nВремя: {timestamp}\n"
-                    response_message += f"Ответ: {temp_response_text}\n"
+                    response_message = f"💬 Номер ответа: {response_id}.\n👤 ID Пользователя: <code>{author_id}</code>\n👍 Количество голосов: {votes}\n🕒 Время: {timestamp}\n"
+                    response_message += f"📄 Ответ: {temp_response_text}\n"
                     if response_media:
                         if response_media.startswith("AgAC"):
                             await bot.send_photo(chat_id=message.chat.id, photo=response_media,
@@ -1054,17 +1167,17 @@ async def process_request_id(message: types.Message, state: FSMContext):
                 await bot.send_message(chat_id=message.chat.id, text="Что вы хотите сделать?",
                                        reply_markup=keyboard)
             else:
-                await bot.send_message(chat_id=message.chat.id, text="Нет ответов на данный запрос.\n",
+                await bot.send_message(chat_id=message.chat.id, text="❌ Нет ответов на данный запрос.\n",
                                        reply_markup=keyboard)
 
         else:
-            await bot.send_message(chat_id=message.chat.id, text="Вопрос с указанным номером не найден.")
+            await bot.send_message(chat_id=message.chat.id, text="❌ Вопрос с указанным номером не найден.")
 
     except ValueError:
-        await bot.send_message(chat_id=message.chat.id, text="Неверный формат ввода номера вопроса.")
+        await bot.send_message(chat_id=message.chat.id, text="❌ Неверный формат ввода номера вопроса.")
 
     except Exception as e:
-        await bot.send_message(chat_id=message.chat.id, text=f"Произошла ошибка: {e}")
+        await bot.send_message(chat_id=message.chat.id, text=f"❌ Произошла ошибка: {e}")
     finally:
         await state.finish()
 
@@ -1092,7 +1205,7 @@ async def check_answers(callback_query: types.CallbackQuery, state: FSMContext):
             await AnswerRequest.waiting_for_request_id.set()
     except Exception as e:
         await bot.send_message(chat_id=callback_query.from_user.id,
-                               text=f"Произошла ошибка: {e}")
+                               text=f"❌ Произошла ошибка: {e}")
 
 
 class AnswerResponse(StatesGroup):
@@ -1111,7 +1224,7 @@ async def create_response_callback(callback_query: types.CallbackQuery, state: F
         await AnswerResponse.waiting_for_response_text.set()
 
     except Exception as e:
-        await bot.send_message(chat_id=callback_query.from_user.id, text=f"Произошла ошибка: {e}")
+        await bot.send_message(chat_id=callback_query.from_user.id, text=f"❌ Произошла ошибка: {e}")
 
 
 @dp.message_handler(state=AnswerResponse.waiting_for_response_text, content_types=[
@@ -1147,25 +1260,61 @@ async def create_response(message: types.Message, state: FSMContext):
         elif message.video_note:
             file_id = message.video_note.file_id
             await message.video_note.download(destination_dir='responses_video_notes')
-        else:
-            await bot.send_message(author_id, response_text)
 
-        cursor.execute("""
-            INSERT INTO KnowledgeResponses (request_id, author_id, response_text, response_media)
-            VALUES (?, ?, ?, ?)
-        """, (request_id, author_id, response_text, file_id))
+        if file_id:
+            cursor.execute("""
+                INSERT INTO KnowledgeResponses (request_id, author_id, response_text, response_media)
+                VALUES (?, ?, ?, ?)
+            """, (request_id, author_id, response_text, file_id))
+        else:
+            cursor.execute("""
+                INSERT INTO KnowledgeResponses (request_id, author_id, response_text)
+                VALUES (?, ?, ?)
+            """, (request_id, author_id, response_text))
+
         conn.commit()
 
-        await bot.send_message(chat_id=message.chat.id, text="Ваш ответ сохранен и отправлен на модерацию")
+        await bot.send_message(chat_id=message.chat.id, text="✅ Ваш ответ сохранен и отправлен на модерацию")
+
+        cursor.execute("SELECT response_text FROM KnowledgeResponses WHERE id = ?", (request_id,))
+        request_text = cursor.fetchone()
+
+        if request_text:
+            request_text = request_text[0]
+        else:
+            request_text = "Нет текста запроса"
+
+        id_answer = cursor.execute("SELECT id FROM KnowledgeResponses WHERE request_id =? AND author_id =? AND "
+                                   "response_text =? AND response_media = ?", (request_id, author_id, response_text,
+                                                                               file_id)).fetchone()[0]
 
         admins = cursor.execute("SELECT user_id FROM Admins").fetchall()
         for admin in admins:
-            await bot.send_message(chat_id=admin[0], text=f"Новый ответ на вопрос:{response_text}")
+            if file_id:
+                if file_id.startswith("AgAC"):
+                    await bot.send_photo(chat_id=admin[0], photo=file_id,
+                                         caption=f"📸 Новый ответ: {request_text}\n<code>/approve_answer {id_answer}</code> или <code>/reject_answer {id_answer}</code>")
+                elif file_id.startswith("BAAC"):
+                    await bot.send_video(chat_id=admin[0], video=file_id,
+                                         caption=f"🎥 Новый ответ: {request_text}\n<code>/approve_answer {id_answer}</code> или <code>/reject_answer {id_answer}</code>")
+                elif file_id.startswith("AwAC"):
+                    await bot.send_voice(chat_id=admin[0], voice=file_id,
+                                         caption=f"🎤 Новый ответ: {request_text}\n<code>/approve_answer {id_answer}</code> или <code>/reject_answer {id_answer}</code>")
+                elif file_id.startswith("BQAC"):
+                    await bot.send_document(chat_id=admin[0], document=file_id,
+                                            caption=f"📄 Новый ответ: {request_text}\n<code>/approve_answer {id_answer}</code> или <code>/reject_answer {id_answer}</code>")
+                elif file_id.startswith("DQAC"):
+                    await bot.send_message(chat_id=admin[0],
+                                           text=f"📝 Новый ответ: {request_text}\n<code>/approve_answer {id_answer}</code> или <code>/reject_answer {id_answer}</code>")
+                    await bot.send_video_note(chat_id=admin[0], video_note=file_id)
+            else:
+                await bot.send_message(chat_id=admin[0],
+                                       text=f"📝 Новый ответ: {request_text}\n<code>/approve_answer {id_answer}</code> или <code>/reject_answer {id_answer}</code>")
 
         await state.finish()
 
     except Exception as e:
-        await bot.send_message(chat_id=message.chat.id, text=f"Произошла ошибка: {e}")
+        await bot.send_message(chat_id=message.chat.id, text=f"❌ Произошла ошибка: {e}")
 
 
 @dp.callback_query_handler(lambda callback_query: callback_query.data.startswith('vote_question_'))
@@ -1178,16 +1327,16 @@ async def vote_question(callback_query: types.CallbackQuery):
         existing_vote = cursor.fetchone()
 
         if existing_vote:
-            await bot.answer_callback_query(callback_query.id, text="Вы уже голосовали за этот вопрос!")
+            await bot.answer_callback_query(callback_query.id, text="❌ Вы уже голосовали за этот вопрос!")
         else:
             cursor.execute("UPDATE KnowledgeRequests SET votes = votes + 1 WHERE id = ?", (request_id,))
             cursor.execute("INSERT INTO QuestionVotes (user_id, question_id) VALUES (?, ?)", (user_id, request_id))
             conn.commit()
 
-            await bot.answer_callback_query(callback_query.id, text="Вы успешно проголосовали за вопрос!")
+            await bot.answer_callback_query(callback_query.id, text="✅ Вы успешно проголосовали за вопрос!")
 
     except Exception as e:
-        await bot.send_message(chat_id=callback_query.from_user.id, text=f"Произошла ошибка: {e}")
+        await bot.send_message(chat_id=callback_query.from_user.id, text=f"❌ Произошла ошибка: {e}")
 
 
 @dp.callback_query_handler(lambda callback_query: callback_query.data.startswith('vote_response_'))
@@ -1201,7 +1350,7 @@ async def vote_response(callback_query: types.CallbackQuery, state: FSMContext):
         async with state.proxy() as data:
             data['response_id'] = int(callback_query.data.split('_')[-1])
     except Exception as e:
-        await bot.send_message(chat_id=callback_query.from_user.id, text=f"Произошла ошибка: {e}")
+        await bot.send_message(chat_id=callback_query.from_user.id, text=f"❌ Произошла ошибка: {e}")
 
 
 @dp.message_handler(state=AnswerRequest.waiting_for_response_id)
@@ -1218,7 +1367,7 @@ async def process_response_id(message: types.Message, state: FSMContext):
         existing_vote = cursor.fetchone()
 
         if existing_vote:
-            await message.answer("Вы уже голосовали за этот ответ!")
+            await message.answer("❌ Вы уже голосовали за этот ответ!")
         else:
             cursor.execute("""
                 UPDATE KnowledgeResponses
@@ -1230,14 +1379,14 @@ async def process_response_id(message: types.Message, state: FSMContext):
             cursor.execute("INSERT INTO ResponseVotes (user_id, response_id) VALUES (?, ?)", (user_id, response_id))
             conn.commit()
 
-            await message.answer("Ваш голос за ответ успешно засчитан!")
+            await message.answer("✅ Ваш голос за ответ успешно засчитан!")
 
             await state.finish()
 
     except ValueError:
-        await message.answer("Неверный формат ввода номера ответа.")
+        await message.answer("❌ Неверный формат ввода номера ответа.")
     except Exception as e:
-        await message.answer(f"Произошла ошибка: {e}")
+        await message.answer(f"❌ Произошла ошибка: {e}")
 
 
 if __name__ == '__main__':

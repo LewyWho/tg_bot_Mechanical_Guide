@@ -239,7 +239,7 @@ async def my_settings_yes_needed_sms_for_user(callback_query: types.CallbackQuer
     try:
         user_id = callback_query.from_user.id
         cursor.execute("UPDATE Users SET needed_sms_for_user = 1 WHERE id =?", (user_id,))
-        await bot.answer_callback_query(callback_query.id, text="Теперь вы будете получать сообщения от пользователей.")
+        await bot.send_message(callback_query.from_user.id, text="Теперь вы будете получать сообщения от пользователей.")
     except Exception as e:
         await bot.send_message(chat_id=callback_query.from_user.id, text=f"Произошла ошибка: {e}")
     finally:
@@ -251,8 +251,8 @@ async def my_settings_no_needed_sms_for_user(callback_query: types.CallbackQuery
     try:
         user_id = callback_query.from_user.id
         cursor.execute("UPDATE Users SET needed_sms_for_user = 0 WHERE id =?", (user_id,))
-        await bot.answer_callback_query(callback_query.id,
-                                        text="Теперь вы не будете получать сообщения от пользователей.")
+        await bot.send_message(callback_query.from_user.id, text="Теперь вы не будете получать сообщения от пользователей.")
+
     except Exception as e:
         await bot.send_message(chat_id=callback_query.from_user.id, text=f"Произошла ошибка: {e}")
     finally:
@@ -264,8 +264,7 @@ async def my_settings_yes_notification_preferences(callback_query: types.Callbac
     try:
         user_id = callback_query.from_user.id
         cursor.execute("UPDATE Users SET notification_preferences = 1 WHERE id =?", (user_id,))
-        await bot.answer_callback_query(callback_query.id,
-                                        text="Теперь вы будете получать уведомления о новых сообщениях.")
+        await bot.send_message(callback_query.from_user.id, text="Теперь вы будете получать уведомления о новых сообщениях.")
     except Exception as e:
         await bot.send_message(chat_id=callback_query.from_user.id, text=f"Произошла ошибка: {e}")
     finally:
@@ -277,8 +276,7 @@ async def my_settings_no_notification_preferences(callback_query: types.Callback
     try:
         user_id = callback_query.from_user.id
         cursor.execute("UPDATE Users SET notification_preferences = 0 WHERE id =?", (user_id,))
-        await bot.answer_callback_query(callback_query.id,
-                                        text="Теперь вы не будете получать уведомления о новых сообщениях.")
+        await bot.send_message(callback_query.from_user.id, text="Теперь вы не будете получать уведомления о новых сообщениях..")
     except Exception as e:
         await bot.send_message(chat_id=callback_query.from_user.id, text=f"Произошла ошибка: {e}")
     finally:

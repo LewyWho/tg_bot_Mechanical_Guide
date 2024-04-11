@@ -34,11 +34,14 @@ async def main_menu():
 
 async def button_for_tags(tag_id):
     kb = InlineKeyboardMarkup()
-    kb.add(
-        InlineKeyboardButton("Просмотреть все запросы", callback_data=f"view_all_requests_{tag_id}"),
-        InlineKeyboardButton("Создать запрос", callback_data=f"create_request_{tag_id}"),
-        InlineKeyboardButton("Мои запросы", callback_data=f"my_requests_{tag_id}")
-    )
+    view_requests_btn = InlineKeyboardButton("Просмотреть все запросы", callback_data=f"view_all_requests_{tag_id}")
+    create_request_btn = InlineKeyboardButton("Создать запрос", callback_data=f"create_request_{tag_id}")
+    my_requests_btn = InlineKeyboardButton("Мои запросы", callback_data=f"my_requests_{tag_id}")
+
+    kb.add(view_requests_btn)
+    kb.add(create_request_btn)
+    kb.add(my_requests_btn)
+
     return kb
 
 
