@@ -96,32 +96,26 @@ def get_user_rank(user_id):
 
 
 def profile_user(user_id):
-
     get_user_rank(user_id)
 
     num_questions = get_user_questions_count(user_id)
-
     num_responses = get_user_responses_count(user_id)
 
     result_first = cursor.execute("SELECT votes FROM KnowledgeRequests WHERE author_id=? AND moderated = 1",
                                   (user_id,)).fetchone()
-    if result_first:
-        num_votes_for = result_first[0]
-    else:
-        num_votes_for = 0
+    num_votes_for = result_first[0] if result_first else 0
 
     result_second = cursor.execute(
         "SELECT votes FROM KnowledgeResponses WHERE author_id=? AND moderated = 1",
         (user_id,)).fetchone()
+    num_votes_against = result_second[0] if result_second else 0
 
-    if result_second:
-        num_votes_against = result_second[0]
-    else:
-        num_votes_against = 0
     role = get_user_role(user_id)
     role_str = "Сотрудник" if role == 0 else "Администратор"
+
     rank_user = cursor.execute("SELECT rank_user FROM Users WHERE id=?", (user_id,)).fetchone()[0]
-    return f"""Ваш профиль:
+
+    profile_info = f"""Ваш профиль:
 ➖➖➖➖➖➖➖➖➖➖➖➖➖➖
 Ваш ID: {user_id}
 Количество ваших вопросов: {num_questions}
@@ -130,9 +124,14 @@ def profile_user(user_id):
 Количество голосов для ваших ответов: {num_votes_against}
 Ваша роль: {role_str}
 Ваш ранг: {rank_user}
-➖➖➖➖➖➖➖➖➖➖➖➖➖➖
-/help - Вывод всех доступных команд
 ➖➖➖➖➖➖➖➖➖➖➖➖➖➖"""
+
+    if role == 1:
+        profile_info += "\n/admin_help - Список всех команд для администратора"
+
+    profile_info += "\n/help - Вывод всех доступных команд\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖"
+
+    return profile_info
 
 
 def get_tag(tag):
@@ -151,6 +150,20 @@ def help_message():
 /a_change - изменить свой ответ
 /q_change - изменить свой вопрос
 /users - список всех пользователей бота
+/login - войти как администратор
 /sms - отправить сообщение пользователю
 /cancel - отменить действие
+➖➖➖➖➖➖➖➖➖➖➖➖➖➖"""
+
+
+def admin_help():
+    return """Все доступные команды для администратора:
+➖➖➖➖➖➖➖➖➖➖➖➖➖➖
+/check_answers - Модерация ответов
+/check_questions - Модерация вопросов
+/mailing - Массовая отправка сообщений
+/delete_user - Удаление пользователя
+/ban_user - Блокировка пользователя
+/unban_user - Разблокировка пользователя
+/sms_user - Отправка сообщения пользователю
 ➖➖➖➖➖➖➖➖➖➖➖➖➖➖"""
