@@ -128,112 +128,125 @@ async def handler_ban_user(message: types.Message, state: FSMContext):
     types.ContentType.VIDEO_NOTE
 ])
 async def handler_check_answers(message: types.Message, state: FSMContext):
-    cursor.execute("""
-        SELECT kr.id, kr.response_text, kr.response_media, kr.author_id, u.username
-        FROM KnowledgeResponses kr
-        JOIN Users u ON kr.author_id = u.id
-        WHERE kr.moderated = 0
-    """)
-    unmoderated_answers = cursor.fetchall()
-
-    if not unmoderated_answers:
-        await message.answer("Нет немодерированных ответов.")
+    admins = cursor.execute("SELECT user_id FROM Admins WHERE user_id =?", (message.from_user.id,)).fetchone()
+    if not admins:
+        await bot.send_message(chat_id=message.from_user.id, text="❌ У вас нет доступа к этой команде.")
         return
+    else:
+        cursor.execute("""
+            SELECT kr.id, kr.response_text, kr.response_media, kr.author_id, u.username
+            FROM KnowledgeResponses kr
+            JOIN Users u ON kr.author_id = u.id
+            WHERE kr.moderated = 0
+        """)
+        unmoderated_answers = cursor.fetchall()
 
-    for answer_id, response_text, response_media, author_id, username in unmoderated_answers:
-        answer_message = f"🆔 ID ответа: {answer_id}\n" \
-                         f"👤 Автор: @{username} (ID: {author_id})\n" \
-                         f"💬 Ответ: {response_text}\n"
-        if response_media:
-            if response_media.startswith("AgAC"):
-                await bot.send_photo(chat_id=message.chat.id, photo=response_media, caption=answer_message)
-            elif response_media.startswith("BAAC"):
-                await bot.send_video(chat_id=message.chat.id, video=response_media, caption=answer_message)
-            elif response_media.startswith("AwAC"):
-                await bot.send_voice(chat_id=message.chat.id, voice=response_media, caption=answer_message)
-            elif response_media.startswith("BQAC"):
-                await bot.send_document(chat_id=message.chat.id, document=response_media, caption=answer_message)
-            elif response_media.startswith("DQAC"):
-                await bot.send_message(chat_id=message.chat.id, text=answer_message)
-                await bot.send_video_note(chat_id=message.chat.id, video_note=response_media)
-        else:
-            await message.answer(answer_message)
+        if not unmoderated_answers:
+            await message.answer("Нет немодерированных ответов.")
+            return
 
-    await message.answer("Выберите ID ответа для модерации, используя команду /approve_answer <b>ID</b> или "
-                         "/reject_answer <b>ID</b>.")
+        for answer_id, response_text, response_media, author_id, username in unmoderated_answers:
+            answer_message = f"🆔 ID ответа: {answer_id}\n" \
+                             f"👤 Автор: @{username} (ID: {author_id})\n" \
+                             f"💬 Ответ: {response_text}\n"
+            if response_media:
+                if response_media.startswith("AgAC"):
+                    await bot.send_photo(chat_id=message.chat.id, photo=response_media, caption=answer_message)
+                elif response_media.startswith("BAAC"):
+                    await bot.send_video(chat_id=message.chat.id, video=response_media, caption=answer_message)
+                elif response_media.startswith("AwAC"):
+                    await bot.send_voice(chat_id=message.chat.id, voice=response_media, caption=answer_message)
+                elif response_media.startswith("BQAC"):
+                    await bot.send_document(chat_id=message.chat.id, document=response_media, caption=answer_message)
+                elif response_media.startswith("DQAC"):
+                    await bot.send_message(chat_id=message.chat.id, text=answer_message)
+                    await bot.send_video_note(chat_id=message.chat.id, video_note=response_media)
+            else:
+                await message.answer(answer_message)
+
+        await message.answer("Выберите ID ответа для модерации, используя команду /approve_answer <b>ID</b> или "
+                             "/reject_answer <b>ID</b>.")
 
 
 @dp.message_handler(commands=['approve_question'])
 async def approve_question(message: types.Message):
-    question_id = message.get_args()
-    if not question_id.isdigit():
-        await message.answer("❌ Некорректный формат ID вопроса. Пожалуйста, укажите числовое значение ID.")
-        return
-    await message.answer(f"✅ Вопрос с ID {question_id} был принят.")
-
-    cursor.execute("UPDATE KnowledgeRequests SET moderated = 1 WHERE id = ?", (question_id,))
-    conn.commit()
-
-    cursor.execute("""
-        SELECT rq.author_id, u.username
-        FROM KnowledgeRequests rq
-        JOIN Users u ON rq.author_id = u.id
-        WHERE rq.id = ?
-    """, (question_id,))
-    result = cursor.fetchone()
-
-    if result:
-        author_id, username = result
-
-        media_file = \
-        cursor.execute("SELECT request_media FROM KnowledgeRequests WHERE id = ?", (question_id,)).fetchone()[0]
-
-        caption = f"✅ Ваш вопрос с ID {question_id} был принят модератором.\nВаш запрос находится в прикрепленном файле."
-
-        if media_file:
-            if media_file.startswith("AgAC"):
-                await bot.send_photo(author_id, photo=media_file, caption=caption)
-            elif media_file.startswith("BAAC"):
-                await bot.send_video(author_id, video=media_file, caption=caption)
-            elif media_file.startswith("AwAC"):
-                await bot.send_voice(author_id, voice=media_file, caption=caption)
-            elif media_file.startswith("BQAC"):
-                await bot.send_document(author_id, document=media_file, caption=caption)
-            elif media_file.startswith("DQAC"):
-                await bot.send_message(author_id, caption)
-                await bot.send_video_note(author_id, video_note=media_file, )
-        else:
-            response_text = \
-            cursor.execute("SELECT request_text FROM KnowledgeRequests WHERE id =?", (question_id,)).fetchone()[0]
-            await bot.send_message(author_id,
-                                   f"✅ Ваш вопрос с ID {question_id} был принят модератором.\nВаш запрос: {response_text}.")
+    admins = cursor.execute("SELECT user_id FROM Admins WHERE user_id =?", (message.from_user.id,)).fetchone()
+    if not admins:
+        await bot.send_message(chat_id=message.from_user.id, text="❌ У вас нет доступа к этой команде.")
     else:
-        await message.answer("❌ Не удалось найти информацию о пользователе, отправившем вопрос.")
+        question_id = message.get_args()
+        if not question_id.isdigit():
+            await message.answer("❌ Некорректный формат ID вопроса. Пожалуйста, укажите числовое значение ID.")
+            return
+        await message.answer(f"✅ Вопрос с ID {question_id} был принят.")
+
+        cursor.execute("UPDATE KnowledgeRequests SET moderated = 1 WHERE id = ?", (question_id,))
+        conn.commit()
+
+        cursor.execute("""
+            SELECT rq.author_id, u.username
+            FROM KnowledgeRequests rq
+            JOIN Users u ON rq.author_id = u.id
+            WHERE rq.id = ?
+        """, (question_id,))
+        result = cursor.fetchone()
+
+        if result:
+            author_id, username = result
+
+            media_file = \
+                cursor.execute("SELECT request_media FROM KnowledgeRequests WHERE id = ?", (question_id,)).fetchone()[0]
+
+            caption = f"✅ Ваш вопрос с ID {question_id} был принят модератором.\nВаш запрос находится в прикрепленном файле."
+
+            if media_file:
+                if media_file.startswith("AgAC"):
+                    await bot.send_photo(author_id, photo=media_file, caption=caption)
+                elif media_file.startswith("BAAC"):
+                    await bot.send_video(author_id, video=media_file, caption=caption)
+                elif media_file.startswith("AwAC"):
+                    await bot.send_voice(author_id, voice=media_file, caption=caption)
+                elif media_file.startswith("BQAC"):
+                    await bot.send_document(author_id, document=media_file, caption=caption)
+                elif media_file.startswith("DQAC"):
+                    await bot.send_message(author_id, caption)
+                    await bot.send_video_note(author_id, video_note=media_file, )
+            else:
+                response_text = \
+                    cursor.execute("SELECT request_text FROM KnowledgeRequests WHERE id =?", (question_id,)).fetchone()[0]
+                await bot.send_message(author_id,
+                                       f"✅ Ваш вопрос с ID {question_id} был принят модератором.\nВаш запрос: {response_text}.")
+        else:
+            await message.answer("❌ Не удалось найти информацию о пользователе, отправившем вопрос.")
 
 
 @dp.message_handler(commands=['reject_question'])
 async def reject_question(message: types.Message):
-    question_id = message.get_args()
-    if not question_id.isdigit():
-        await message.answer("❌ Некорректный формат ID вопроса. Пожалуйста, укажите числовое значение ID.")
-        return
-    await message.answer(f"✅ Вопрос с ID {question_id} был отклонен.")
-
-    cursor.execute("DELETE FROM KnowledgeRequests WHERE id = ?", (question_id,))
-    conn.commit()
-
-    cursor.execute("""
-        SELECT author_id
-        FROM KnowledgeRequests
-        WHERE id = ?
-    """, (question_id,))
-    result = cursor.fetchone()
-
-    if result:
-        author_id = result[0]
-        await bot.send_message(author_id, f"❌ Ваш вопрос с ID {question_id} был отклонен модератором.")
+    admins = cursor.execute("SELECT user_id FROM Admins WHERE user_id =?", (message.from_user.id,)).fetchone()
+    if not admins:
+        await bot.send_message(chat_id=message.from_user.id, text="❌ У вас нет доступа к этой команде.")
     else:
-        await message.answer("❌ Не удалось найти информацию о пользователе, отправившем вопрос.")
+        question_id = message.get_args()
+        if not question_id.isdigit():
+            await message.answer("❌ Некорректный формат ID вопроса. Пожалуйста, укажите числовое значение ID.")
+            return
+        await message.answer(f"✅ Вопрос с ID {question_id} был отклонен.")
+
+        cursor.execute("DELETE FROM KnowledgeRequests WHERE id = ?", (question_id,))
+        conn.commit()
+
+        cursor.execute("""
+            SELECT author_id
+            FROM KnowledgeRequests
+            WHERE id = ?
+        """, (question_id,))
+        result = cursor.fetchone()
+
+        if result:
+            author_id = result[0]
+            await bot.send_message(author_id, f"❌ Ваш вопрос с ID {question_id} был отклонен модератором.")
+        else:
+            await message.answer("❌ Не удалось найти информацию о пользователе, отправившем вопрос.")
 
 
 @dp.message_handler(commands=['approve_answer'], content_types=[
@@ -245,127 +258,139 @@ async def reject_question(message: types.Message):
     types.ContentType.VIDEO_NOTE
 ])
 async def approve_answer(message: types.Message, state: FSMContext):
-    answer_id = message.get_args()
-    if not answer_id.isdigit():
-        await message.answer("❌ Некорректный формат ID ответа. Пожалуйста, укажите числовое значение ID.")
-        return
+    admins = cursor.execute("SELECT user_id FROM Admins WHERE user_id =?", (message.from_user.id,)).fetchone()
+    if not admins:
+        await bot.send_message(chat_id=message.from_user.id, text="❌ У вас нет доступа к этой команде.")
+    else:
+        answer_id = message.get_args()
+        if not answer_id.isdigit():
+            await message.answer("❌ Некорректный формат ID ответа. Пожалуйста, укажите числовое значение ID.")
+            return
 
-    cursor.execute("UPDATE KnowledgeResponses SET moderated = 1 WHERE id = ?", (answer_id,))
-    conn.commit()
+        cursor.execute("UPDATE KnowledgeResponses SET moderated = 1 WHERE id = ?", (answer_id,))
+        conn.commit()
 
-    cursor.execute("""
-        SELECT kr.author_id, kr.request_id, kr.response_text, kr.response_media,
-               rq.author_id AS request_author_id, rq.request_text, t.tag_name, u.username
-        FROM KnowledgeResponses kr
-        JOIN KnowledgeRequests rq ON kr.request_id = rq.id
-        LEFT JOIN Tags t ON rq.id_tag = t.id
-        JOIN Users u ON kr.author_id = u.id
-        WHERE kr.id = ?
-    """, (answer_id,))
-    result = cursor.fetchone()
+        cursor.execute("""
+            SELECT kr.author_id, kr.request_id, kr.response_text, kr.response_media,
+                   rq.author_id AS request_author_id, rq.request_text, t.tag_name, u.username
+            FROM KnowledgeResponses kr
+            JOIN KnowledgeRequests rq ON kr.request_id = rq.id
+            LEFT JOIN Tags t ON rq.id_tag = t.id
+            JOIN Users u ON kr.author_id = u.id
+            WHERE kr.id = ?
+        """, (answer_id,))
+        result = cursor.fetchone()
 
-    if result:
-        author_id, request_id, response_text, response_media, request_author_id, request_text, tag_name, author_username = result
+        if result:
+            author_id, request_id, response_text, response_media, request_author_id, request_text, tag_name, author_username = result
 
-        if response_media:
-            if response_media.startswith("AgAC"):
-                await bot.send_photo(author_id, response_media, caption=f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ прикреплен к сообщению.")
+            if response_media:
+                if response_media.startswith("AgAC"):
+                    await bot.send_photo(author_id, response_media,
+                                         caption=f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ прикреплен к сообщению.")
 
-                await bot.send_photo(request_author_id, response_media,
-                                     caption=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
-                                             f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
-                                             f"👤 Имя пользователя: @{author_username}\n" \
-                                             f"💬 Его ответ: {response_text}")
-            elif response_media.startswith("BAAC"):
-                await bot.send_video(author_id, response_media, caption=f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ прикреплен к сообщению.")
-
-                await bot.send_video(request_author_id, response_media,
-                                     caption=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
-                                             f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
-                                             f"👤 Имя пользователя: @{author_username}\n" \
-                                             f"💬 Его ответ: {response_text}")
-            elif response_media.startswith("AwAC"):
-                try:
-                    await bot.send_voice(author_id, response_media, caption=f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ прикреплен к сообщению.")
-                except BadRequest as e:
-                    await bot.send_message(author_id, text=f"✅ Ваш ответ к тегу {tag_name} был принят.")
-                try:
-                    await bot.send_voice(request_author_id, response_media,
+                    await bot.send_photo(request_author_id, response_media,
                                          caption=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
                                                  f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
                                                  f"👤 Имя пользователя: @{author_username}\n" \
                                                  f"💬 Его ответ: {response_text}")
-                except BadRequest as e:
-                    await bot.send_message(request_author_id,
-                                           text=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
+                elif response_media.startswith("BAAC"):
+                    await bot.send_video(author_id, response_media,
+                                         caption=f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ прикреплен к сообщению.")
+
+                    await bot.send_video(request_author_id, response_media,
+                                         caption=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
                                                  f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
                                                  f"👤 Имя пользователя: @{author_username}\n" \
                                                  f"💬 Его ответ: {response_text}")
-            elif response_media.startswith("BQAC"):
-                await bot.send_document(author_id, response_media, caption=f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ прикреплен к сообщению.")
+                elif response_media.startswith("AwAC"):
+                    try:
+                        await bot.send_voice(author_id, response_media,
+                                             caption=f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ прикреплен к сообщению.")
+                    except BadRequest as e:
+                        await bot.send_message(author_id, text=f"✅ Ваш ответ к тегу {tag_name} был принят.")
+                    try:
+                        await bot.send_voice(request_author_id, response_media,
+                                             caption=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
+                                                     f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
+                                                     f"👤 Имя пользователя: @{author_username}\n" \
+                                                     f"💬 Его ответ: {response_text}")
+                    except BadRequest as e:
+                        await bot.send_message(request_author_id,
+                                               text=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
+                                                    f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
+                                                    f"👤 Имя пользователя: @{author_username}\n" \
+                                                    f"💬 Его ответ: {response_text}")
+                elif response_media.startswith("BQAC"):
+                    await bot.send_document(author_id, response_media,
+                                            caption=f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ прикреплен к сообщению.")
 
-                await bot.send_document(request_author_id, response_media,
-                                        caption=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
-                                                f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
-                                                f"👤 Имя пользователя: @{author_username}\n" \
-                                                f"💬 Его ответ: {response_text}")
-            elif response_media.startswith("DQAC"):
-                try:
-                    await bot.send_message(author_id, f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ: ")
-                    await bot.send_video_note(author_id, response_media)
-                except BadRequest as e:
-                    await bot.send_message(author_id, text=f"✅ Ваш ответ к тегу {tag_name} был принят.")
+                    await bot.send_document(request_author_id, response_media,
+                                            caption=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
+                                                    f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
+                                                    f"👤 Имя пользователя: @{author_username}\n" \
+                                                    f"💬 Его ответ: {response_text}")
+                elif response_media.startswith("DQAC"):
+                    try:
+                        await bot.send_message(author_id, f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ: ")
+                        await bot.send_video_note(author_id, response_media)
+                    except BadRequest as e:
+                        await bot.send_message(author_id, text=f"✅ Ваш ответ к тегу {tag_name} был принят.")
 
-                try:
-                    await bot.send_message(request_author_id,
-                                           text=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
-                                                f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
-                                                f"👤 Имя пользователя: @{author_username}\n" \
-                                                f"💬 Его ответ: {response_text}")
-                    await bot.send_video_note(request_author_id, response_media)
-                except BadRequest as e:
-                    await bot.send_message(request_author_id,
-                                           text=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
-                                                 f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
-                                                 f"👤 Имя пользователя: @{author_username}\n" \
-                                                 f"💬 Его ответ: {response_text}")
+                    try:
+                        await bot.send_message(request_author_id,
+                                               text=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
+                                                    f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
+                                                    f"👤 Имя пользователя: @{author_username}\n" \
+                                                    f"💬 Его ответ: {response_text}")
+                        await bot.send_video_note(request_author_id, response_media)
+                    except BadRequest as e:
+                        await bot.send_message(request_author_id,
+                                               text=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
+                                                    f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
+                                                    f"👤 Имя пользователя: @{author_username}\n" \
+                                                    f"💬 Его ответ: {response_text}")
+            else:
+                await bot.send_message(author_id, f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ: {response_text}")
+
+                await bot.send_message(request_author_id,
+                                       text=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
+                                            f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
+                                            f"👤 Имя пользователя: @{author_username}\n" \
+                                            f"💬 Его ответ: {response_text}")
+
+            await message.answer("✅ Ответ успешно принят и отправлен автору запроса.")
         else:
-            await bot.send_message(author_id, f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ: {response_text}")
-
-            await bot.send_message(request_author_id,
-                                   text=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
-                                        f"🆔 ID Пользователя: <code>{author_id}</code>\n\n" \
-                                        f"👤 Имя пользователя: @{author_username}\n" \
-                                        f"💬 Его ответ: {response_text}")
-
-        await message.answer("✅ Ответ успешно принят и отправлен автору запроса.")
-    else:
-        await message.answer("❌ Не удалось найти информацию об ответе.")
+            await message.answer("❌ Не удалось найти информацию об ответе.")
 
 
 @dp.message_handler(commands=['reject_answer'])
 async def reject_answer(message: types.Message):
-    answer_id = message.get_args()
-    if not answer_id.isdigit():
-        await message.answer("❌ Некорректный формат ID ответа. Пожалуйста, укажите числовое значение ID.")
-        return
-
-    cursor.execute("""
-        SELECT author_id
-        FROM KnowledgeResponses
-        WHERE id = ?
-    """, (answer_id,))
-    result = cursor.fetchone()
-
-    if result:
-        author_id = result[0]
-        await bot.send_message(author_id, f"❌ Ваш ответ с ID {answer_id} был отклонен модератором.")
-        await message.answer("✅ Ответ успешно отклонен.")
-
-        cursor.execute("DELETE FROM KnowledgeResponses WHERE id = ?", (answer_id,))
-        conn.commit()
+    admins = cursor.execute("SELECT user_id FROM Admins WHERE user_id =?", (message.from_user.id,)).fetchone()
+    if not admins:
+        await bot.send_message(chat_id=message.from_user.id, text="❌ У вас нет доступа к этой команде.")
     else:
-        await message.answer("❌ Не удалось найти информацию об ответе.")
+        answer_id = message.get_args()
+        if not answer_id.isdigit():
+            await message.answer("❌ Некорректный формат ID ответа. Пожалуйста, укажите числовое значение ID.")
+            return
+
+        cursor.execute("""
+            SELECT author_id
+            FROM KnowledgeResponses
+            WHERE id = ?
+        """, (answer_id,))
+        result = cursor.fetchone()
+
+        if result:
+            author_id = result[0]
+            await bot.send_message(author_id, f"❌ Ваш ответ с ID {answer_id} был отклонен модератором.")
+            await message.answer("✅ Ответ успешно отклонен.")
+
+            cursor.execute("DELETE FROM KnowledgeResponses WHERE id = ?", (answer_id,))
+            conn.commit()
+        else:
+            await message.answer("❌ Не удалось найти информацию об ответе.")
 
 
 @dp.message_handler(commands=['check_questions'], state='*', content_types=[
@@ -377,106 +402,122 @@ async def reject_answer(message: types.Message):
     types.ContentType.VIDEO_NOTE
 ])
 async def handler_check_questions(message: types.Message, state: FSMContext):
-    cursor.execute("""
-        SELECT rq.id, rq.request_text, rq.request_media, rq.author_id, u.username
-        FROM KnowledgeRequests rq
-        JOIN Users u ON rq.author_id = u.id
-        LEFT JOIN KnowledgeResponses kr ON rq.id = kr.request_id
-        WHERE rq.moderated = 0
-    """)
-    unmoderated_questions = cursor.fetchall()
+    admins = cursor.execute("SELECT user_id FROM Admins WHERE user_id =?", (message.from_user.id,)).fetchone()
+    if not admins:
+        await bot.send_message(chat_id=message.from_user.id, text="❌ У вас нет доступа к этой команде.")
+    else:
+        cursor.execute("""
+            SELECT rq.id, rq.request_text, rq.request_media, rq.author_id, u.username
+            FROM KnowledgeRequests rq
+            JOIN Users u ON rq.author_id = u.id
+            LEFT JOIN KnowledgeResponses kr ON rq.id = kr.request_id
+            WHERE rq.moderated = 0
+        """)
+        unmoderated_questions = cursor.fetchall()
 
-    if not unmoderated_questions:
-        await message.answer("Нет немодерированных вопросов.")
-        return
+        if not unmoderated_questions:
+            await message.answer("Нет немодерированных вопросов.")
+            return
 
-    for question_id, request_text, request_media, author_id, username in unmoderated_questions:
-        question_message = f"🆔 ID вопроса: {question_id}\n" \
-                           f"👤 Автор: @{username} (ID: <code>{author_id}</code>)\n" \
-                           f"💬 Вопрос: {request_text}\n"
-        if request_media:
-            if request_media.startswith("AgAC"):
-                await bot.send_photo(chat_id=message.chat.id, photo=request_media, caption=question_message)
-            elif request_media.startswith("BAAC"):
-                await bot.send_video(chat_id=message.chat.id, video=request_media, caption=question_message)
-            elif request_media.startswith("AwAC"):
-                await bot.send_voice(chat_id=message.chat.id, voice=request_media, caption=question_message)
-            elif request_media.startswith("BQAC"):
-                await bot.send_document(chat_id=message.chat.id, document=request_media, caption=question_message)
-            elif request_media.startswith("DQAC"):
-                await bot.send_message(chat_id=message.chat.id, text=question_message)
-                await bot.send_video_note(chat_id=message.chat.id, video_note=request_media)
-        else:
-            await message.answer(question_message)
+        for question_id, request_text, request_media, author_id, username in unmoderated_questions:
+            question_message = f"🆔 ID вопроса: {question_id}\n" \
+                               f"👤 Автор: @{username} (ID: <code>{author_id}</code>)\n" \
+                               f"💬 Вопрос: {request_text}\n"
+            if request_media:
+                if request_media.startswith("AgAC"):
+                    await bot.send_photo(chat_id=message.chat.id, photo=request_media, caption=question_message)
+                elif request_media.startswith("BAAC"):
+                    await bot.send_video(chat_id=message.chat.id, video=request_media, caption=question_message)
+                elif request_media.startswith("AwAC"):
+                    await bot.send_voice(chat_id=message.chat.id, voice=request_media, caption=question_message)
+                elif request_media.startswith("BQAC"):
+                    await bot.send_document(chat_id=message.chat.id, document=request_media, caption=question_message)
+                elif request_media.startswith("DQAC"):
+                    await bot.send_message(chat_id=message.chat.id, text=question_message)
+                    await bot.send_video_note(chat_id=message.chat.id, video_note=request_media)
+            else:
+                await message.answer(question_message)
 
-    await message.answer("Выберите ID вопроса для модерации, используя команду /approve_question <b>ID</b> или "
-                         "/reject_question <b>ID</b>.")
+        await message.answer("Выберите ID вопроса для модерации, используя команду /approve_question <b>ID</b> или "
+                             "/reject_question <b>ID</b>.")
 
 
 @dp.message_handler(commands=['mailing'], state='*')
 async def handler_mailing(message: types.Message, state: FSMContext):
-    args = message.get_args()
-    if not args:
-        await message.answer("❌ Вы не указали текст сообщения. Используйте команду /mailing <текст сообщения>.")
-        return
+    admins = cursor.execute("SELECT user_id FROM Admins WHERE user_id =?", (message.from_user.id,)).fetchone()
+    if not admins:
+        await bot.send_message(chat_id=message.from_user.id, text="❌ У вас нет доступа к этой команде.")
+    else:
+        args = message.get_args()
+        if not args:
+            await message.answer("❌ Вы не указали текст сообщения. Используйте команду /mailing <текст сообщения>.")
+            return
 
-    sms_text = args
+        sms_text = args
 
-    sms_text = f"💬 Рассылка: {sms_text}"
+        sms_text = f"💬 Рассылка: {sms_text}"
 
-    cursor.execute("SELECT id FROM Users")
-    user_ids = cursor.fetchall()
+        cursor.execute("SELECT id FROM Users")
+        user_ids = cursor.fetchall()
 
-    for user_id in user_ids:
-        try:
-            await bot.send_message(chat_id=user_id[0], text=sms_text)
-        except Exception as e:
-            print(f"Ошибка при отправке сообщения пользователю с ID {user_id[0]}: {e}")
+        for user_id in user_ids:
+            try:
+                await bot.send_message(chat_id=user_id[0], text=sms_text)
+            except Exception as e:
+                print(f"Ошибка при отправке сообщения пользователю с ID {user_id[0]}: {e}")
 
-    await message.answer("✅ Рассылка завершена.")
+        await message.answer("✅ Рассылка завершена.")
 
 
 @dp.message_handler(commands=['unban_user'], state='*')
 async def handler_unban_user(message: types.Message, state: FSMContext):
-    args = message.get_args()
-    if not args:
-        await message.answer("❌ Вы не указали ID пользователя. Используйте команду /unban_user <b>ID пользователя</b>.")
-        return
+    admins = cursor.execute("SELECT user_id FROM Admins WHERE user_id =?", (message.from_user.id,)).fetchone()
+    if not admins:
+        await bot.send_message(chat_id=message.from_user.id, text="❌ У вас нет доступа к этой команде.")
+    else:
+        args = message.get_args()
+        if not args:
+            await message.answer("❌ Вы не указали ID пользователя. Используйте команду /unban_user <b>ID пользователя</b>.")
+            return
 
-    user_id = args
+        user_id = args
 
-    cursor.execute("UPDATE Users SET banned = 0 WHERE id=?", (user_id,))
-    conn.commit()
+        cursor.execute("UPDATE Users SET banned = 0 WHERE id=?", (user_id,))
+        conn.commit()
 
-    await message.answer(f"✅ Пользователь с ID {user_id} разблокирован.")
+        await message.answer(f"✅ Пользователь с ID {user_id} разблокирован.")
 
 
 @dp.message_handler(commands=['sms_user'], state='*')
 async def handler_sms_user(message: types.Message, state: FSMContext):
-    args = message.get_args()
-    if not args:
-        await message.answer("❌ Вы не указали ID пользователя и текст сообщения.\n"
-                             "Используйте команду /sms_user <b>ID пользователя</b> <b>текст сообщения</b>.")
-        return
-
-    try:
-        user_id, sms_text = args.split(maxsplit=1)
-    except ValueError:
-        await message.answer(
-            "❌ Некорректный формат. Используйте команду /sms_user <b>ID пользователя</b> <b>текст сообщения</b>.")
-        return
-
-    cursor.execute("SELECT username FROM Users WHERE id=?", (user_id,))
-    username = cursor.fetchone()
-    if username:
-        username = username[0]
+    admins = cursor.execute("SELECT user_id FROM Admins WHERE user_id =?", (message.from_user.id,)).fetchone()
+    if not admins:
+        await bot.send_message(chat_id=message.from_user.id, text="❌ У вас нет доступа к этой команде.")
     else:
-        username = "неизвестно"
+        args = message.get_args()
+        if not args:
+            await message.answer("❌ Вы не указали ID пользователя и текст сообщения.\n"
+                                 "Используйте команду /sms_user <b>ID пользователя</b> <b>текст сообщения</b>.")
+            return
 
-    sms_text = f"💬 Сообщение от администратора:\n{sms_text}"
+        try:
+            user_id, sms_text = args.split(maxsplit=1)
+        except ValueError:
+            await message.answer(
+                "❌ Некорректный формат. Используйте команду /sms_user <b>ID пользователя</b> <b>текст сообщения</b>.")
+            return
 
-    await bot.send_message(chat_id=user_id, text=sms_text)
-    await message.answer(f"✅ Сообщение отправлено пользователю с ID {user_id} ({username}).")
+        cursor.execute("SELECT username FROM Users WHERE id=?", (user_id,))
+        username = cursor.fetchone()
+        if username:
+            username = username[0]
+        else:
+            username = "неизвестно"
+
+        sms_text = f"💬 Сообщение от администратора:\n{sms_text}"
+
+        await bot.send_message(chat_id=user_id, text=sms_text)
+        await message.answer(f"✅ Сообщение отправлено пользователю с ID {user_id} ({username}).")
 
 
 @dp.message_handler(commands=['login'], state='*')
@@ -505,9 +546,13 @@ async def handler_login_admin(message: types.Message, state: FSMContext):
 
 @dp.message_handler(commands=['admin_help'], state='*')
 async def handler_admin_help(message: types.Message, state: FSMContext):
-    admin = cursor.execute('SELECT * FROM Admins WHERE user_id =?', (message.from_user.id,)).fetchone()[0]
-    if admin:
-        await bot.send_message(chat_id=message.from_user.id, text=sms.admin_help())
+    admins = cursor.execute("SELECT user_id FROM Admins WHERE user_id =?", (message.from_user.id,)).fetchone()
+    if not admins:
+        await bot.send_message(chat_id=message.from_user.id, text="❌ У вас нет доступа к этой команде.")
+    else:
+        admin = cursor.execute('SELECT * FROM Admins WHERE user_id =?', (message.from_user.id,)).fetchone()[0]
+        if admin:
+            await bot.send_message(chat_id=message.from_user.id, text=sms.admin_help())
 
 
 @dp.message_handler(commands=['users'], state='*')
