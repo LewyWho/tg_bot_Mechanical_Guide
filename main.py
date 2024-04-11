@@ -73,7 +73,7 @@ async def delete_user(message: types.Message, state: FSMContext):
     cursor.execute("SELECT role FROM Users WHERE id=?", (user_id,))
     user_role = cursor.fetchone()
 
-    if not user_role or user_role[0] != 1:  # Если отправитель не администратор
+    if not user_role or user_role[0] != 1:
         await message.answer("Вы не являетесь администратором и не имеете доступа к этой команде.")
         return
 
@@ -174,7 +174,6 @@ async def approve_question(message: types.Message):
     cursor.execute("UPDATE KnowledgeRequests SET moderated = 1 WHERE id = ?", (question_id,))
     conn.commit()
 
-    # Получаем информацию о пользователе, отправившем вопрос
     cursor.execute("""
         SELECT rq.author_id, u.username
         FROM KnowledgeRequests rq
@@ -201,7 +200,6 @@ async def reject_question(message: types.Message):
     cursor.execute("DELETE FROM KnowledgeRequests WHERE id = ?", (question_id,))
     conn.commit()
 
-    # Получаем информацию о пользователе, отправившем вопрос
     cursor.execute("""
         SELECT author_id
         FROM KnowledgeRequests
@@ -226,7 +224,6 @@ async def approve_answer(message: types.Message, state: FSMContext):
     cursor.execute("UPDATE KnowledgeResponses SET moderated = 1 WHERE id = ?", (answer_id,))
     conn.commit()
 
-    # Получаем информацию о пользователе, отправившем ответ
     cursor.execute("""
         SELECT kr.author_id, kr.request_id, kr.response_text, kr.response_media,
                rq.author_id AS request_author_id, rq.request_text, t.tag_name
@@ -294,7 +291,6 @@ async def reject_answer(message: types.Message):
     cursor.execute("DELETE FROM KnowledgeResponses WHERE id = ?", (answer_id,))
     conn.commit()
 
-    # Получаем информацию о пользователе, отправившем ответ
     cursor.execute("""
         SELECT author_id
         FROM KnowledgeResponses
@@ -558,7 +554,6 @@ async def process_question_number(message: types.Message, state: FSMContext):
     await ChangeAnswer.waiting_for_new_answer.set()
 
 
-# Обработка медиа-файлов в ответах пользователя
 @dp.message_handler(state=ChangeAnswer.waiting_for_new_answer, content_types=[
     types.ContentType.TEXT,
     types.ContentType.DOCUMENT,
