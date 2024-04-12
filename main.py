@@ -232,9 +232,6 @@ async def reject_question(message: types.Message):
             return
         await message.answer(f"✅ Вопрос с ID {question_id} был отклонен.")
 
-        cursor.execute("DELETE FROM KnowledgeRequests WHERE id = ?", (question_id,))
-        conn.commit()
-
         cursor.execute("""
             SELECT author_id
             FROM KnowledgeRequests
@@ -245,6 +242,8 @@ async def reject_question(message: types.Message):
         if result:
             author_id = result[0]
             await bot.send_message(author_id, f"❌ Ваш вопрос с ID {question_id} был отклонен модератором.")
+            cursor.execute("DELETE FROM KnowledgeRequests WHERE id = ?", (question_id,))
+            conn.commit()
         else:
             await message.answer("❌ Не удалось найти информацию о пользователе, отправившем вопрос.")
 
@@ -724,7 +723,7 @@ async def handler_q_change(message: types.Message, state: FSMContext):
         return
 
     for index, question in enumerate(user_questions, start=1):
-        question_message = f"{index}. Ваш вопрос: {question[1]}\nТег: {question[4]}\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
+        question_message = f"{question[0]}. Ваш вопрос: {question[1]}\nТег: {question[4]}\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
         if question[2]:
             media_file_id = question[2]
             if media_file_id.startswith("AgAC"):
@@ -802,11 +801,46 @@ async def process_new_question(message: types.Message, state: FSMContext):
         "UPDATE KnowledgeRequests SET request_text=?, request_media=?, moderated=0 WHERE id=? AND author_id=?",
         (new_question, media_file_id, question_number, user_id))
     conn.commit()
+
     await message.answer("✅ Вопрос успешно изменен и отправлен на проверку.")
 
     admins = cursor.execute("SELECT user_id FROM Admins").fetchall()
     for admin in admins:
-        await bot.send_message(chat_id=admin[0], text=f"📩 Вопрос {question_number} изменен пользователем {user_id}.")
+        if message.photo:
+            await bot.send_message(chat_id=admin[0],
+                                   text=f"📩 Вопрос {question_number} изменен пользователем {user_id}.\nВот его новый вопрос: ")
+            media_file_id = message.photo[-1].file_id
+            await bot.send_photo(chat_id=admin[0], photo=media_file_id)
+            await bot.send_message(chat_id=admin[0], text=f'<code>/approve_question {question_number}</code> или <code>/reject_question {question_number}</code>')
+        elif message.video:
+            await bot.send_message(chat_id=admin[0],
+                                   text=f"📩 Вопрос {question_number} изменен пользователем {user_id}.\nВот его новый вопрос: ")
+            media_file_id = message.video.file_id
+            await bot.send_video(chat_id=admin[0], video=media_file_id)
+            await bot.send_message(chat_id=admin[0], text=f'<code>/approve_question {question_number}</code> или <code>/reject_question {question_number}</code>')
+        elif message.voice:
+            await bot.send_message(chat_id=admin[0],
+                                   text=f"📩 Вопрос {question_number} изменен пользователем {user_id}.\nВот его новый вопрос: ")
+            media_file_id = message.voice.file_id
+            await bot.send_voice(chat_id=admin[0], voice=media_file_id)
+            await bot.send_message(chat_id=admin[0], text=f'<code>/approve_question {question_number}</code> или <code>/reject_question {question_number}</code>')
+        elif message.document:
+            await bot.send_message(chat_id=admin[0],
+                                   text=f"📩 Вопрос {question_number} изменен пользователем {user_id}.\nВот его новый вопрос: ")
+            media_file_id = message.document.file_id
+            await bot.send_document(chat_id=admin[0], document=media_file_id)
+            await bot.send_message(chat_id=admin[0], text=f'<code>/approve_question {question_number}</code> или <code>/reject_question {question_number}</code>')
+        elif message.video_note:
+            await bot.send_message(chat_id=admin[0],
+                                   text=f"📩 Вопрос {question_number} изменен пользователем {user_id}.\nВот его новый вопрос: ")
+            media_file_id = message.video_note.file_id
+            await bot.send_video_note(chat_id=admin[0], video_note=media_file_id)
+            await bot.send_message(chat_id=admin[0], text=f'<code>/approve_question {question_number}</code> или <code>/reject_question {question_number}</code>')
+        else:
+            await bot.send_message(chat_id=admin[0],
+                                   text=f"📩 Вопрос {question_number} изменен пользователем {user_id}.\nВот его новый вопрос: {new_question}")
+            await bot.send_message(chat_id=admin[0], text=f'<code>/approve_question {question_number}</code> или <code>/reject_question {question_number}</code>')
+
     await state.finish()
 
 
