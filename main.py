@@ -213,7 +213,8 @@ async def approve_question(message: types.Message):
                     await bot.send_video_note(author_id, video_note=media_file, )
             else:
                 response_text = \
-                    cursor.execute("SELECT request_text FROM KnowledgeRequests WHERE id =?", (question_id,)).fetchone()[0]
+                    cursor.execute("SELECT request_text FROM KnowledgeRequests WHERE id =?", (question_id,)).fetchone()[
+                        0]
                 await bot.send_message(author_id,
                                        f"✅ Ваш вопрос с ID {question_id} был принят модератором.\nВаш запрос: {response_text}.")
         else:
@@ -350,7 +351,8 @@ async def approve_answer(message: types.Message, state: FSMContext):
                                                     f"👤 Имя пользователя: @{author_username}\n" \
                                                     f"💬 Его ответ: {response_text}")
             else:
-                await bot.send_message(author_id, f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ: {response_text}")
+                await bot.send_message(author_id,
+                                       f"✅ Ваш ответ к тегу {tag_name} был принят.\nВаш ответ: {response_text}")
 
                 await bot.send_message(request_author_id,
                                        text=f"🔍 Ваш запрос: '{request_text}'\n🏷️ Название тега: {tag_name}\n" \
@@ -476,7 +478,8 @@ async def handler_unban_user(message: types.Message, state: FSMContext):
     else:
         args = message.get_args()
         if not args:
-            await message.answer("❌ Вы не указали ID пользователя. Используйте команду /unban_user <b>ID пользователя</b>.")
+            await message.answer(
+                "❌ Вы не указали ID пользователя. Используйте команду /unban_user <b>ID пользователя</b>.")
             return
 
         user_id = args
@@ -811,35 +814,41 @@ async def process_new_question(message: types.Message, state: FSMContext):
                                    text=f"📩 Вопрос {question_number} изменен пользователем {user_id}.\nВот его новый вопрос: ")
             media_file_id = message.photo[-1].file_id
             await bot.send_photo(chat_id=admin[0], photo=media_file_id)
-            await bot.send_message(chat_id=admin[0], text=f'<code>/approve_question {question_number}</code> или <code>/reject_question {question_number}</code>')
+            await bot.send_message(chat_id=admin[0],
+                                   text=f'<code>/approve_question {question_number}</code> или <code>/reject_question {question_number}</code>')
         elif message.video:
             await bot.send_message(chat_id=admin[0],
                                    text=f"📩 Вопрос {question_number} изменен пользователем {user_id}.\nВот его новый вопрос: ")
             media_file_id = message.video.file_id
             await bot.send_video(chat_id=admin[0], video=media_file_id)
-            await bot.send_message(chat_id=admin[0], text=f'<code>/approve_question {question_number}</code> или <code>/reject_question {question_number}</code>')
+            await bot.send_message(chat_id=admin[0],
+                                   text=f'<code>/approve_question {question_number}</code> или <code>/reject_question {question_number}</code>')
         elif message.voice:
             await bot.send_message(chat_id=admin[0],
                                    text=f"📩 Вопрос {question_number} изменен пользователем {user_id}.\nВот его новый вопрос: ")
             media_file_id = message.voice.file_id
             await bot.send_voice(chat_id=admin[0], voice=media_file_id)
-            await bot.send_message(chat_id=admin[0], text=f'<code>/approve_question {question_number}</code> или <code>/reject_question {question_number}</code>')
+            await bot.send_message(chat_id=admin[0],
+                                   text=f'<code>/approve_question {question_number}</code> или <code>/reject_question {question_number}</code>')
         elif message.document:
             await bot.send_message(chat_id=admin[0],
                                    text=f"📩 Вопрос {question_number} изменен пользователем {user_id}.\nВот его новый вопрос: ")
             media_file_id = message.document.file_id
             await bot.send_document(chat_id=admin[0], document=media_file_id)
-            await bot.send_message(chat_id=admin[0], text=f'<code>/approve_question {question_number}</code> или <code>/reject_question {question_number}</code>')
+            await bot.send_message(chat_id=admin[0],
+                                   text=f'<code>/approve_question {question_number}</code> или <code>/reject_question {question_number}</code>')
         elif message.video_note:
             await bot.send_message(chat_id=admin[0],
                                    text=f"📩 Вопрос {question_number} изменен пользователем {user_id}.\nВот его новый вопрос: ")
             media_file_id = message.video_note.file_id
             await bot.send_video_note(chat_id=admin[0], video_note=media_file_id)
-            await bot.send_message(chat_id=admin[0], text=f'<code>/approve_question {question_number}</code> или <code>/reject_question {question_number}</code>')
+            await bot.send_message(chat_id=admin[0],
+                                   text=f'<code>/approve_question {question_number}</code> или <code>/reject_question {question_number}</code>')
         else:
             await bot.send_message(chat_id=admin[0],
                                    text=f"📩 Вопрос {question_number} изменен пользователем {user_id}.\nВот его новый вопрос: {new_question}")
-            await bot.send_message(chat_id=admin[0], text=f'<code>/approve_question {question_number}</code> или <code>/reject_question {question_number}</code>')
+            await bot.send_message(chat_id=admin[0],
+                                   text=f'<code>/approve_question {question_number}</code> или <code>/reject_question {question_number}</code>')
 
     await state.finish()
 
@@ -1304,6 +1313,7 @@ async def create_response_callback(callback_query: types.CallbackQuery, state: F
 
     except Exception as e:
         await bot.send_message(chat_id=callback_query.from_user.id, text=f"❌ Произошла ошибка: {e}")
+        print(e)
 
 
 @dp.message_handler(state=AnswerResponse.waiting_for_response_text, content_types=[
@@ -1319,8 +1329,8 @@ async def create_response(message: types.Message, state: FSMContext):
         async with state.proxy() as data:
             request_id = data['request_id']
 
-        response_text = message.text if message.text else "Нет ответа в виде текста."
         author_id = message.from_user.id
+        response_text = message.text if message.text else "Нет ответа в виде текста."
 
         file_id = None
 
@@ -1339,6 +1349,8 @@ async def create_response(message: types.Message, state: FSMContext):
         elif message.video_note:
             file_id = message.video_note.file_id
             await message.video_note.download(destination_dir='responses_video_notes')
+        elif message.text:
+            response_text = response_text
 
         if file_id:
             cursor.execute("""
@@ -1355,17 +1367,25 @@ async def create_response(message: types.Message, state: FSMContext):
 
         await bot.send_message(chat_id=message.chat.id, text="✅ Ваш ответ сохранен и отправлен на модерацию")
 
-        cursor.execute("SELECT response_text FROM KnowledgeResponses WHERE id = ?", (request_id,))
+        id_answer_query = cursor.execute(
+            "SELECT id FROM KnowledgeResponses WHERE request_id =? AND author_id =? AND response_text =? AND "
+            "response_media = ?",
+            (request_id, author_id, response_text, file_id))
+
+        id_answer_row = id_answer_query.fetchone()
+
+        if id_answer_row:
+            id_answer = id_answer_row[0]
+        else:
+            id_answer = None
+
+        cursor.execute("SELECT response_text FROM KnowledgeResponses WHERE id = ?", (id_answer,))
         request_text = cursor.fetchone()
 
         if request_text:
             request_text = request_text[0]
         else:
             request_text = "Нет текста запроса"
-
-        id_answer = cursor.execute("SELECT id FROM KnowledgeResponses WHERE request_id =? AND author_id =? AND "
-                                   "response_text =? AND response_media = ?", (request_id, author_id, response_text,
-                                                                               file_id)).fetchone()[0]
 
         admins = cursor.execute("SELECT user_id FROM Admins").fetchall()
         for admin in admins:
@@ -1393,7 +1413,7 @@ async def create_response(message: types.Message, state: FSMContext):
         await state.finish()
 
     except Exception as e:
-        await bot.send_message(chat_id=message.chat.id, text=f"❌ Произошла ошибка: {e}")
+        print(e)
 
 
 @dp.callback_query_handler(lambda callback_query: callback_query.data.startswith('vote_question_'))
